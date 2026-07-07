@@ -134,6 +134,7 @@ describe('POST /api/booking/admin/bookings', () => {
   function happyDb(insertChanges = 1) {
     return scriptedDb([
       ['FROM friends', { first: { id: 'f1', is_following: 1 } }],
+      ['FROM staff WHERE', { first: { ok: 1 } }],
       [
         'FROM menus m',
         {
@@ -239,5 +240,68 @@ describe('POST /api/booking/admin/bookings', () => {
       execCtx,
     );
     expect(res.status).toBe(422);
+  });
+
+  test('404 when staff belongs to another account', async () => {
+    availabilityMocks.computeSlots.mockReturnValue([{ start: '11:00', end: '12:00' }]);
+    // friend exists, but the staff-in-account assertion returns no row.
+    const db = scriptedDb([
+      ['FROM friends', { first: { id: 'f1', is_following: 1 } }],
+      ['FROM staff WHERE', { first: null }],
+    ]);
+    const { app, env } = makeApp(db);
+    const res = await app.request(
+      '/api/booking/admin/bookings?account_id=acc1',
+      {
+        method: 'POST',
+        body: JSON.stringify(validBody),
+        headers: { 'Content-Type': 'application/json' },
+      },
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('staff_not_found');
+  });
+
+  test('existing-bookings window uses correct JST bounds for a September date', async () => {
+    availabilityMocks.computeSlots.mockReturnValue([{ start: '11:00', end: '12:00' }]);
+    const db = happyDb();
+    const { app, env } = makeApp(db);
+    const res = await app.request(
+      '/api/booking/admin/bookings?account_id=acc1',
+      {
+        method: 'POST',
+        body: JSON.stringify({ ...validBody, starts_at: '2026-09-10T02:00:00.000Z' }),
+        headers: { 'Content-Type': 'application/json' },
+      },
+      env,
+      execCtx,
+    );
+    expect(res.status).toBe(201);
+    // The busy-window query must bind real ISO timestamps, never a corrupted
+    // string from the old `.replace('-09', ...)` (which mangled September dates).
+    const windowQuery = db.calls.find(
+      (c) => c.sql.includes('SELECT starts_at, block_ends_at FROM bookings'),
+    );
+    const [, endUtc, startUtc] = windowQuery!.params as [string, string, string];
+    expect(startUtc).toBe('2026-09-09T15:00:00.000Z'); // JST 2026-09-10 00:00 = prev-day 15:00Z
+    expect(endUtc).toBe('2026-09-10T15:00:00Z'); // JST 2026-09-11 00:00 = 2026-09-10 15:00Z
+  });
+});
+
+describe('jstDayWindowUtc', () => {
+  test('July date: bounds cover the full JST calendar day', async () => {
+    const { jstDayWindowUtc } = await import('./booking.js');
+    const w = jstDayWindowUtc('2026-07-10');
+    expect(w.startUtc).toBe('2026-07-09T15:00:00.000Z');
+    expect(w.endUtc).toBe('2026-07-10T15:00:00Z');
+  });
+
+  test('September/November dates are not corrupted', async () => {
+    const { jstDayWindowUtc } = await import('./booking.js');
+    expect(jstDayWindowUtc('2026-09-10').startUtc).toBe('2026-09-09T15:00:00.000Z');
+    expect(jstDayWindowUtc('2026-11-09').startUtc).toBe('2026-11-08T15:00:00.000Z');
   });
 });

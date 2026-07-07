@@ -40,6 +40,18 @@ function startsAtJst(utcIso: string): string {
   return `${jst.slice(0, 10)} ${jst.slice(11, 16)}`;
 }
 
+// UTC [start, end) bounds covering a JST calendar day (YYYY-MM-DD in JST).
+// The JST day runs [date 00:00 JST, date+1 00:00 JST) = [date-1 15:00Z, date 15:00Z).
+// Used to fetch a staff member's existing bookings for slot computation.
+// (Replaces a broken `${date}T-09:00:00.000Z`.replace('-09','00') that corrupted
+//  any date string containing '-09'/'-11'/'-12' and dropped JST 00:00-09:00.)
+export function jstDayWindowUtc(jstDate: string): { startUtc: string; endUtc: string } {
+  return {
+    startUtc: new Date(`${jstDate}T00:00:00+09:00`).toISOString(),
+    endUtc: `${jstDate}T15:00:00Z`,
+  };
+}
+
 async function resolveAccountIdFromLiff(c: Context<Env>): Promise<string | null> {
   const liffId = c.req.query('liffId');
   if (!liffId) return null;
@@ -357,8 +369,8 @@ booking.post('/api/liff/booking/requests', async (c) => {
     )
     .bind(
       body.staff_id,
-      `${startJstDate}T15:00:00Z`,
-      `${startJstDate}T-09:00:00.000Z`.replace('-09', '00'),
+      jstDayWindowUtc(startJstDate).endUtc,
+      jstDayWindowUtc(startJstDate).startUtc,
     )
     .all<{ starts_at: string; block_ends_at: string }>();
   const slotsToday = computeSlots({
@@ -751,6 +763,11 @@ booking.post('/api/booking/admin/bookings', async (c) => {
   if (!friend) return c.json({ error: 'friend_not_found' }, 404);
   if (friend.is_following === 0) return c.json({ error: 'cannot_book' }, 403);
 
+  // staff が同じ account に属することを保証（別 tenant の staff への予約を防ぐ）。
+  if (!(await assertStaffInAccount(c.env.DB, body.staff_id, accountId))) {
+    return c.json({ error: 'staff_not_found' }, 404);
+  }
+
   const menuRow = await c.env.DB
     .prepare(
       `SELECT m.id, m.duration_minutes, m.buffer_after_minutes, m.base_price,
@@ -794,8 +811,8 @@ booking.post('/api/booking/admin/bookings', async (c) => {
     )
     .bind(
       body.staff_id,
-      `${startJstDate}T15:00:00Z`,
-      `${startJstDate}T-09:00:00.000Z`.replace('-09', '00'),
+      jstDayWindowUtc(startJstDate).endUtc,
+      jstDayWindowUtc(startJstDate).startUtc,
     )
     .all<{ starts_at: string; block_ends_at: string }>();
   const slotsToday = computeSlots({
