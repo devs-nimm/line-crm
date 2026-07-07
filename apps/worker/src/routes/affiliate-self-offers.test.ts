@@ -119,6 +119,24 @@ beforeEach(() => {
     fid === AFFILIATE.friend_id ? AFFILIATE : null,
   );
   dbMocks.listAffiliateLinks.mockImplementation(async () => [...links]);
+  dbMocks.countAffiliateLinks.mockImplementation(async () => links.length);
+  dbMocks.createAffiliateLink.mockImplementation(
+    async (_db: unknown, input: { affiliateId: string; label?: string | null; offerId?: string | null }) => {
+      const link: LinkRow = {
+        id: crypto.randomUUID(),
+        affiliate_id: input.affiliateId,
+        ref_code: `lnk${links.length}`,
+        label: input.label ?? null,
+        line_account_id: null,
+        is_active: 1,
+        created_at: '2026-01-01 00:00:00',
+        click_count: 0,
+        offer_id: input.offerId ?? null,
+      };
+      links.unshift(link);
+      return link;
+    },
+  );
   dbMocks.getAffiliateLinkStats.mockResolvedValue(new Map());
   // Only the active offer is returned by activeOnly listing.
   dbMocks.listAffiliateOffers.mockResolvedValue([ACTIVE_OFFER]);
@@ -219,5 +237,66 @@ describe('POST /api/liff/affiliate/offers/:id/enroll', () => {
       body: JSON.stringify({ lineAccessToken: 'tok-nope' }),
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /api/liff/affiliate/links — offer-scoped issuance', () => {
+  it('issues an offer-scoped link once enrolled, carrying offerId + offerName', async () => {
+    // Enroll first so the caller has a link for the offer.
+    await call('/api/liff/affiliate/offers/off-active/enroll', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lineAccessToken: 'tok-alice' }),
+    });
+
+    const res = await call('/api/liff/affiliate/links', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lineAccessToken: 'tok-alice', label: 'X用', offerId: 'off-active' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      link: { label: string | null; offerId: string | null; offerName: string | null };
+    };
+    expect(body.link.label).toBe('X用');
+    expect(body.link.offerId).toBe('off-active');
+    expect(body.link.offerName).toBe('案件A');
+    // The new link was created with the offer scope, not a generic link.
+    expect(links.some((l) => l.offer_id === 'off-active' && l.label === 'X用')).toBe(true);
+  });
+
+  it('404s an offerId that is inactive/unknown without creating a link', async () => {
+    const res = await call('/api/liff/affiliate/links', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lineAccessToken: 'tok-alice', offerId: 'off-inactive' }),
+    });
+    expect(res.status).toBe(404);
+    expect(dbMocks.createAffiliateLink).not.toHaveBeenCalled();
+  });
+
+  it('400s when the caller has not yet enrolled in the offer', async () => {
+    // No enroll → no existing link for off-active → issuance is refused.
+    const res = await call('/api/liff/affiliate/links', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lineAccessToken: 'tok-alice', offerId: 'off-active' }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('先に案件に参加してください');
+    expect(dbMocks.createAffiliateLink).not.toHaveBeenCalled();
+  });
+
+  it('still issues a generic link when offerId is omitted', async () => {
+    const res = await call('/api/liff/affiliate/links', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lineAccessToken: 'tok-alice', label: '汎用' }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { link: { offerId: string | null; label: string | null } };
+    expect(body.link.offerId).toBeNull();
+    expect(body.link.label).toBe('汎用');
   });
 });

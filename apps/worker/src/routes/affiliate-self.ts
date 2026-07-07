@@ -263,13 +263,23 @@ affiliateSelfRoutes.get('/api/liff/affiliate/me', async (c) => {
 
 /**
  * POST /api/liff/affiliate/links — issue a new self-serve link.
- * Body: { lineAccessToken, label? }. Enforces the 20-link cap (21st → 400).
+ * Body: { lineAccessToken, label?, offerId? }. Enforces the 20-link cap
+ * (21st → 400).
+ *
+ * When `offerId` is supplied the new link is scoped to that offer, which powers
+ * the "この案件用のリンクを追加" action on each offer card. The offer must be
+ * active (404 otherwise) and the caller must already be enrolled in it — i.e.
+ * have at least one existing link for that offer (400 「先に案件に参加してください」
+ * otherwise). Offer-scoped links carry the offer's line_account_id so their
+ * attribution matches the enroll-issued link.
+ *
+ * Omitting `offerId` keeps the existing generic-link behaviour untouched.
  */
 affiliateSelfRoutes.post('/api/liff/affiliate/links', async (c) => {
   try {
     const body = await c.req
-      .json<{ lineAccessToken?: string; label?: string | null }>()
-      .catch((): { lineAccessToken?: string; label?: string | null } => ({}));
+      .json<{ lineAccessToken?: string; label?: string | null; offerId?: string | null }>()
+      .catch((): { lineAccessToken?: string; label?: string | null; offerId?: string | null } => ({}));
     const token = body.lineAccessToken;
     if (!token) {
       return c.json({ success: false, error: 'lineAccessToken is required' }, 400);
@@ -295,10 +305,35 @@ affiliateSelfRoutes.post('/api/liff/affiliate/links', async (c) => {
       );
     }
 
+    // offerId is optional. When present, gate issuance on an active offer the
+    // caller has already joined so an offer-scoped link can never be minted for
+    // an offer the affiliate isn't participating in (or one that's been hidden).
+    const offerId = typeof body.offerId === 'string' && body.offerId ? body.offerId : null;
+    let offerLineAccountId: string | null = null;
+    if (offerId) {
+      const activeOffers = await listAffiliateOffers(db, { activeOnly: true });
+      const offer = activeOffers.find((o) => o.id === offerId);
+      if (!offer) {
+        return c.json({ success: false, error: 'Offer not found' }, 404);
+      }
+      const existingLinks = await listAffiliateLinks(db, affiliate.id);
+      const enrolled = existingLinks.some((l) => l.offer_id === offerId);
+      if (!enrolled) {
+        return c.json({ success: false, error: '先に案件に参加してください' }, 400);
+      }
+      offerLineAccountId = offer.line_account_id ?? null;
+    }
+
     const label = typeof body.label === 'string' ? body.label : null;
-    const link = await createAffiliateLink(db, { affiliateId: affiliate.id, label });
+    const link = await createAffiliateLink(db, {
+      affiliateId: affiliate.id,
+      label,
+      offerId,
+      lineAccountId: offerLineAccountId,
+    });
     const baseUrl = await resolveLinkBaseUrl(db, c.env);
-    return c.json({ link: serializeLink(link, baseUrl) });
+    const offerNames = offerId ? await loadOfferNames(db) : undefined;
+    return c.json({ link: serializeLink(link, baseUrl, undefined, offerNames) });
   } catch (err) {
     console.error('POST /api/liff/affiliate/links error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);

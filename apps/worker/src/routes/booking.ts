@@ -20,6 +20,7 @@ import {
   saveIdempotencyResponse,
 } from '../services/booking-idempotency.js';
 import { sendBookingNotification } from '../services/booking-notifier.js';
+import { insertConfirmationReminders } from '../services/booking-confirm.js';
 import { attachTagAndFireSideEffects } from '../services/friend-tag-attach.js';
 import {
   DEFAULT_ACCOUNT_SETTINGS,
@@ -672,6 +673,198 @@ booking.delete('/api/booking/admin/menus/:id', async (c) => {
 
 // ---- Staff CRUD ----
 
+// Admin mirror of the LIFF menu-staff lookup — used by the iOS app's
+// proxy-booking flow (operator books on behalf of a friend from chat).
+booking.get('/api/booking/admin/menus/:id/staff', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const menuId = c.req.param('id');
+  const rows = await c.env.DB
+    .prepare(
+      `SELECT s.id, s.display_name, s.role, s.profile_image_url, s.bio,
+              s.is_designation_optional,
+              COALESCE(sm.override_price, m.base_price) AS price,
+              COALESCE(sm.override_duration_minutes, m.duration_minutes) AS duration_minutes
+         FROM staff s
+         INNER JOIN staff_menus sm ON sm.staff_id = s.id AND sm.menu_id = ?2 AND sm.is_offered = 1
+         INNER JOIN menus m ON m.id = ?2
+        WHERE s.line_account_id = ?1 AND s.is_active = 1 AND s.deleted_at IS NULL
+        ORDER BY s.is_designation_optional DESC, s.sort_order ASC, s.id ASC`,
+    )
+    .bind(accountId, menuId)
+    .all();
+  return c.json({ staff: rows.results });
+});
+
+// Admin mirror of the LIFF availability lookup. minLeadTimeMinutes is 0:
+// the operator is on the phone with the customer and may book a slot
+// starting within the lead-time window that customers themselves cannot.
+booking.get('/api/booking/admin/availability', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const menuId = c.req.query('menu_id');
+  const staffId = c.req.query('staff_id') || undefined;
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  if (!menuId || !from || !to) {
+    return c.json({ error: 'missing_params' }, 400);
+  }
+  const fromD = new Date(`${from}T00:00:00Z`);
+  const toD = new Date(`${to}T00:00:00Z`);
+  if ((toD.getTime() - fromD.getTime()) / 86400_000 > 28) {
+    return c.json({ error: 'range_too_wide' }, 400);
+  }
+  const result = await getAvailability(c.env.DB, {
+    lineAccountId: accountId,
+    menuId,
+    staffId,
+    from,
+    to,
+    now: new Date(),
+    minLeadTimeMinutes: 0,
+  });
+  return c.json(result);
+});
+
+// Proxy booking: the operator creates a CONFIRMED booking on behalf of a
+// friend, straight from the iOS chat screen. Same shift/slot/conflict
+// validation as the LIFF flow, but NO min-lead-time check (the operator
+// may book a slot starting sooner than customers are allowed to).
+booking.post('/api/booking/admin/bookings', async (c) => {
+  const accountId = await resolveAccountIdAdmin(c);
+  if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
+  const body = await c.req.json<{
+    friend_id: string;
+    menu_id: string;
+    staff_id: string;
+    starts_at: string; // UTC ISO8601
+    customer_note?: string;
+  }>();
+  if (!body.friend_id || !body.menu_id || !body.staff_id || !body.starts_at) {
+    return c.json({ error: 'missing_params' }, 400);
+  }
+
+  const friend = await c.env.DB
+    .prepare(`SELECT id, is_following FROM friends WHERE id = ? AND line_account_id = ?`)
+    .bind(body.friend_id, accountId)
+    .first<{ id: string; is_following: number }>();
+  if (!friend) return c.json({ error: 'friend_not_found' }, 404);
+  if (friend.is_following === 0) return c.json({ error: 'cannot_book' }, 403);
+
+  const menuRow = await c.env.DB
+    .prepare(
+      `SELECT m.id, m.duration_minutes, m.buffer_after_minutes, m.base_price,
+              COALESCE(sm.override_duration_minutes, m.duration_minutes) AS dur,
+              COALESCE(sm.override_price, m.base_price) AS price,
+              sm.is_offered
+         FROM menus m
+         LEFT JOIN staff_menus sm ON sm.menu_id = m.id AND sm.staff_id = ?2
+        WHERE m.id = ?1 AND m.line_account_id = ?3
+          AND m.deleted_at IS NULL AND m.is_active = 1`,
+    )
+    .bind(body.menu_id, body.staff_id, accountId)
+    .first<{ duration_minutes: number; buffer_after_minutes: number; dur: number; price: number; is_offered: number | null }>();
+  if (!menuRow || menuRow.is_offered !== 1) {
+    return c.json({ error: 'menu_not_offered' }, 422);
+  }
+
+  const startsAt = new Date(body.starts_at);
+  if (Number.isNaN(startsAt.getTime())) {
+    return c.json({ error: 'invalid_starts_at' }, 422);
+  }
+  if (startsAt < new Date()) {
+    return c.json({ error: 'past_datetime' }, 422);
+  }
+  const endsAt = new Date(startsAt.getTime() + menuRow.dur * 60_000);
+  const blockEndsAt = new Date(endsAt.getTime() + menuRow.buffer_after_minutes * 60_000);
+
+  // Shift + slot validation — same shape as the LIFF create route.
+  const startJstDate = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+  const startJstHHMM = new Date(startsAt.getTime() + 9 * 3600_000).toISOString().slice(11, 16);
+  const shift = await c.env.DB
+    .prepare(`SELECT start_time, end_time FROM staff_shifts WHERE staff_id = ? AND work_date = ?`)
+    .bind(body.staff_id, startJstDate)
+    .first<{ start_time: string; end_time: string }>();
+  if (!shift) return c.json({ error: 'out_of_shift' }, 422);
+  const existingBookings = await c.env.DB
+    .prepare(
+      `SELECT starts_at, block_ends_at FROM bookings
+        WHERE staff_id = ? AND status IN ('requested','confirmed')
+          AND starts_at < ? AND block_ends_at > ?`,
+    )
+    .bind(
+      body.staff_id,
+      `${startJstDate}T15:00:00Z`,
+      `${startJstDate}T-09:00:00.000Z`.replace('-09', '00'),
+    )
+    .all<{ starts_at: string; block_ends_at: string }>();
+  const slotsToday = computeSlots({
+    working: [{ start: shift.start_time, end: shift.end_time }],
+    busy: existingBookings.results.map((b) => ({
+      start: new Date(new Date(b.starts_at).getTime() + 9 * 3600_000).toISOString().slice(11, 16),
+      end: new Date(new Date(b.block_ends_at).getTime() + 9 * 3600_000).toISOString().slice(11, 16),
+    })),
+    menu: { duration_minutes: menuRow.dur, buffer_after_minutes: menuRow.buffer_after_minutes },
+    granularityMinutes: 30,
+  });
+  if (!slotsToday.some((s) => s.start === startJstHHMM)) {
+    return c.json({ error: 'slot_not_available' }, 422);
+  }
+
+  const bookingId = crypto.randomUUID();
+  const nowIso = new Date().toISOString();
+  const insertResult = await c.env.DB
+    .prepare(
+      `INSERT INTO bookings
+        (id, line_account_id, friend_id, staff_id, menu_id,
+         starts_at, ends_at, block_ends_at, status,
+         customer_note, price_at_booking, requested_at, decided_at)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM bookings
+           WHERE staff_id = ?
+             AND status IN ('requested','confirmed')
+             AND starts_at < ?
+             AND block_ends_at > ?
+        )`,
+    )
+    .bind(
+      bookingId,
+      accountId,
+      body.friend_id,
+      body.staff_id,
+      body.menu_id,
+      startsAt.toISOString(),
+      endsAt.toISOString(),
+      blockEndsAt.toISOString(),
+      'confirmed' satisfies BookingStatus,
+      body.customer_note ?? null,
+      menuRow.price,
+      nowIso,
+      nowIso,
+      // NOT EXISTS subquery params
+      body.staff_id,
+      blockEndsAt.toISOString(),
+      startsAt.toISOString(),
+    )
+    .run();
+  if ((insertResult.meta?.changes ?? 0) === 0) {
+    return c.json({ error: 'slot_conflict' }, 409);
+  }
+
+  await insertConfirmationReminders(c.env.DB, {
+    bookingId,
+    startsAt,
+    now: new Date(),
+  });
+  c.executionCtx.waitUntil(
+    notifyForBooking(c.env.DB, bookingId, 'approved').catch((err) =>
+      console.error('booking notify (proxy-create) failed:', err),
+    ),
+  );
+  return c.json({ booking_id: bookingId, status: 'confirmed' }, 201);
+});
+
 booking.get('/api/booking/admin/staff', async (c) => {
   const accountId = await resolveAccountIdAdmin(c);
   if (!accountId) return c.json({ error: 'missing_account_id' }, 400);
@@ -1021,35 +1214,11 @@ booking.patch('/api/booking/admin/requests/:id', async (c) => {
   }
 
   if (next === 'confirmed') {
-    const startsAt = new Date(row.starts_at);
-    const now = new Date();
-    const dayBefore = new Date(startsAt.getTime() - 86400_000);
-    const hoursBefore = new Date(
-      startsAt.getTime() - DEFAULT_ACCOUNT_SETTINGS.reminder_hours_before * 3600_000,
-    );
-    // すでに過去になっているリマインダは作らない。当日承認時に「明日のご予約」が即送信される事故防止。
-    const reminderInserts = [];
-    if (dayBefore > now) {
-      reminderInserts.push(
-        c.env.DB
-          .prepare(
-            `INSERT INTO booking_reminders (id, booking_id, kind, scheduled_at) VALUES (?,?,?,?)`,
-          )
-          .bind(crypto.randomUUID(), id, 'day_before', dayBefore.toISOString()),
-      );
-    }
-    if (hoursBefore > now) {
-      reminderInserts.push(
-        c.env.DB
-          .prepare(
-            `INSERT INTO booking_reminders (id, booking_id, kind, scheduled_at) VALUES (?,?,?,?)`,
-          )
-          .bind(crypto.randomUUID(), id, 'hours_before', hoursBefore.toISOString()),
-      );
-    }
-    if (reminderInserts.length > 0) {
-      await c.env.DB.batch(reminderInserts);
-    }
+    await insertConfirmationReminders(c.env.DB, {
+      bookingId: id,
+      startsAt: new Date(row.starts_at),
+      now: new Date(),
+    });
     c.executionCtx.waitUntil(
       notifyForBooking(c.env.DB, id, 'approved').catch((err) =>
         console.error('booking notify (approved) failed:', err),

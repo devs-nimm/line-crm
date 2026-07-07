@@ -77,12 +77,12 @@ async function postRegister(): Promise<{ affiliate: AffiliateData; links: Affili
   return (await res.json()) as { affiliate: AffiliateData; links: AffiliateLinkData[] };
 }
 
-async function postAddLink(label: string | null): Promise<AffiliateLinkData> {
+async function postAddLink(label: string | null, offerId: string | null): Promise<AffiliateLinkData> {
   const token = await getAccessToken();
   const res = await fetch(`${BASE}/api/liff/affiliate/links`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lineAccessToken: token, label: label || null }),
+    body: JSON.stringify({ lineAccessToken: token, label: label || null, offerId: offerId || null }),
   });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -178,11 +178,8 @@ function CopyButton({ url, urlRef }: { url: string; urlRef: React.RefObject<HTML
 
   return (
     <>
-      <button
-        onClick={handleCopy}
-        className="shrink-0 text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded transition-colors"
-      >
-        {copied ? 'コピーしました' : 'コピー'}
+      <button onClick={handleCopy} className="af-copy-btn">
+        {copied ? 'コピー済み' : 'コピー'}
       </button>
       {manualCopy && (
         <div className="w-full space-y-1">
@@ -195,7 +192,7 @@ function CopyButton({ url, urlRef }: { url: string; urlRef: React.RefObject<HTML
             readOnly
             value={url}
             onFocus={(e) => e.currentTarget.select()}
-            className="w-full border rounded px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="af-input text-xs"
           />
         </div>
       )}
@@ -203,56 +200,135 @@ function CopyButton({ url, urlRef }: { url: string; urlRef: React.RefObject<HTML
   );
 }
 
+const rewardText = (amount: number) =>
+  amount > 0 ? `1件 ¥${amount.toLocaleString()}` : '報酬未設定';
+
+/**
+ * One issued link inside an offer card (or the "その他のリンク" section).
+ * Shows the label, URL, copy button, and the per-link performance counters.
+ */
 function LinkRow({ link }: { link: AffiliateLinkData }) {
   const urlRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className="border rounded p-3 space-y-2">
+    <div className="af-link-row space-y-2">
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1 flex-wrap mb-1">
-            {link.offerName ? (
-              <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
-                {link.offerName}
-              </span>
-            ) : (
-              <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                汎用
-              </span>
-            )}
-            {link.label && (
-              <span className="text-xs font-medium text-gray-700">{link.label}</span>
-            )}
-          </div>
-          <div className="text-xs text-gray-500 break-all">{link.url}</div>
+          {link.label ? (
+            <div className="text-sm font-semibold text-gray-800">{link.label}</div>
+          ) : (
+            <div className="text-sm font-semibold text-gray-500">リンク</div>
+          )}
+          <div className="text-xs text-gray-400 break-all mt-0.5">{link.url}</div>
         </div>
         <CopyButton url={link.url} urlRef={urlRef} />
       </div>
-      <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-        <span>クリック: <strong>{link.clickCount}</strong></span>
-        <span>友だち追加: <strong>{link.friendAdds}</strong></span>
-        <span>CV: 承認済み <strong>{link.conversionsApproved}</strong>・審査中 <strong>{link.conversionsPending}</strong></span>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+        <span>クリック <strong className="af-line-green-text">{link.clickCount}</strong></span>
+        <span>友だち追加 <strong className="af-line-green-text">{link.friendAdds}</strong></span>
+        <span>CV承認済み <strong className="af-line-green-text">{link.conversionsApproved}</strong></span>
+        <span className="text-gray-400">審査中 {link.conversionsPending}</span>
       </div>
     </div>
   );
 }
 
+/**
+ * Inline "この案件用のリンクを追加" form. Rendered inside an enrolled offer card
+ * so the user's mental model is「案件があって、案件に対してリンクを作る」.
+ */
+function AddOfferLinkForm({
+  offerId,
+  atLimit,
+  onAdded,
+}: {
+  offerId: string;
+  atLimit: boolean;
+  onAdded: (link: AffiliateLinkData) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleAdd() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const link = await postAddLink(label.trim() || null, offerId);
+      onAdded(link);
+      setLabel('');
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (atLimit) {
+    return <div className="text-xs text-red-600">リンクの上限（20本）に達しています</div>;
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="af-secondary-btn">
+        ＋ この案件用のリンクを追加
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="text"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="例: X用、Instagram用"
+        className="af-input"
+        disabled={busy}
+      />
+      {error && <div className="text-xs text-red-600">{error}</div>}
+      <div className="flex gap-2">
+        <button onClick={handleAdd} disabled={busy} className="af-primary-btn">
+          {busy ? '発行中…' : 'リンクを発行'}
+        </button>
+        <button
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+          }}
+          disabled={busy}
+          className="shrink-0 px-4 rounded-xl text-sm text-gray-500"
+        >
+          やめる
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * An offer card. Enrolled offers show their scoped links + the add-link form.
+ * Unenrolled offers show the pitch (description + reward) and a 参加する CTA.
+ */
 function OfferCard({
   offer,
+  offerLinks,
+  atLimit,
   onEnrolled,
+  onLinkAdded,
 }: {
   offer: OfferData;
+  offerLinks: AffiliateLinkData[];
+  atLimit: boolean;
   onEnrolled: (link: AffiliateLinkData) => void;
+  onLinkAdded: (link: AffiliateLinkData) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const enrolledUrl = offer.url ?? '';
-  const urlRef = useRef<HTMLInputElement>(null);
   const enrollCalledRef = useRef(false);
-
-  const rewardLabel = offer.rewardAmount > 0
-    ? `1件 ¥${offer.rewardAmount.toLocaleString()}`
-    : '報酬未設定';
 
   async function handleEnroll() {
     if (busy || enrollCalledRef.current) return;
@@ -271,38 +347,35 @@ function OfferCard({
   }
 
   return (
-    <div className="border rounded p-3 space-y-2">
-      <div className="flex items-start justify-between gap-2">
+    <div className="af-card space-y-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-800">{offer.name}</div>
+          <div className="text-base font-bold text-gray-900">{offer.name}</div>
           {offer.description && (
-            <div className="text-xs text-gray-500 mt-0.5">{offer.description}</div>
+            <p className="text-xs text-gray-500 mt-1 leading-relaxed">{offer.description}</p>
           )}
         </div>
-        <div className="shrink-0 text-xs font-medium text-green-700 bg-green-50 px-2 py-1 rounded">
-          {rewardLabel}
-        </div>
+        <span className="af-badge shrink-0" style={{ background: '#ecfdf5', color: '#06c755' }}>
+          {rewardText(offer.rewardAmount)}
+        </span>
       </div>
 
       {offer.enrolled ? (
-        <div className="space-y-1">
-          <div className="text-xs text-gray-600 font-medium">
-            あなたの{offer.name}用リンク
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-xs text-gray-500 break-all flex-1 min-w-0">{enrolledUrl}</div>
-            <CopyButton url={enrolledUrl} urlRef={urlRef} />
-          </div>
+        <div className="space-y-2">
+          {offerLinks.length > 0 ? (
+            offerLinks.map((l) => <LinkRow key={l.refCode} link={l} />)
+          ) : (
+            <div className="text-xs text-gray-400 py-1">
+              リンクを追加すると紹介を始められます
+            </div>
+          )}
+          <AddOfferLinkForm offerId={offer.id} atLimit={atLimit} onAdded={onLinkAdded} />
         </div>
       ) : (
         <>
           {error && <div className="text-xs text-red-600">{error}</div>}
-          <button
-            onClick={handleEnroll}
-            disabled={busy}
-            className="w-full bg-green-600 text-white py-2 rounded text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-          >
-            {busy ? '参加中...' : 'この案件に参加する'}
+          <button onClick={handleEnroll} disabled={busy} className="af-primary-btn">
+            {busy ? '参加中…' : 'この案件に参加する'}
           </button>
         </>
       )}
@@ -313,9 +386,6 @@ function OfferCard({
 export default function Affiliate() {
   const [state, setState] = useState<State>({ phase: 'loading' });
   const [registerBusy, setRegisterBusy] = useState(false);
-  const [addLabel, setAddLabel] = useState('');
-  const [addBusy, setAddBusy] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
   // registerCalledRef guards against a double-tap firing two POSTs while the
   // first is in flight. It is released in `finally` so that a *failed* register
   // can be retried — the button intentionally becomes clickable again on error.
@@ -359,38 +429,20 @@ export default function Affiliate() {
     }
   }
 
-  async function handleAddLink() {
-    if (addBusy) return;
-    setAddBusy(true);
-    setAddError(null);
-    try {
-      const link = await postAddLink(addLabel.trim() || null);
-      setState((prev) => {
-        if (prev.phase !== 'registered') return prev;
-        return { ...prev, links: [...prev.links, link] };
-      });
-      setAddLabel('');
-    } catch (e) {
-      setAddError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAddBusy(false);
-    }
-  }
-
   if (state.phase === 'loading') {
     return (
-      <div className="text-center text-gray-500 py-16">読み込み中...</div>
+      <div className="af-fade-in flex flex-col items-center justify-center py-20 text-gray-500">
+        <div className="af-spinner mb-3" />
+        <span className="text-sm">読み込み中...</span>
+      </div>
     );
   }
 
   if (state.phase === 'error') {
     return (
-      <div className="max-w-md mx-auto p-4">
-        <div className="bg-red-50 text-red-700 p-3 rounded text-sm">{state.message}</div>
-        <button
-          onClick={loadMe}
-          className="mt-3 text-sm text-blue-600 underline"
-        >
+      <div className="af-fade-in max-w-md mx-auto p-4">
+        <div className="bg-red-50 text-red-700 p-3 rounded-xl text-sm">{state.message}</div>
+        <button onClick={loadMe} className="mt-3 text-sm af-line-green-text font-semibold underline">
           再読み込み
         </button>
       </div>
@@ -399,17 +451,15 @@ export default function Affiliate() {
 
   if (state.phase === 'not_registered') {
     return (
-      <div className="max-w-md mx-auto p-4 space-y-4">
-        <h1 className="text-lg font-bold">アフィリエイト</h1>
-        <p className="text-sm text-gray-600">
-          あなた専用の紹介リンクを発行して、友だち追加を紹介できます。
-        </p>
-        <button
-          onClick={handleRegister}
-          disabled={registerBusy}
-          className="w-full bg-green-600 text-white py-3 rounded font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-        >
-          {registerBusy ? '登録中...' : 'アフィリエイターに登録する'}
+      <div className="af-fade-in max-w-md mx-auto p-4 space-y-4">
+        <div>
+          <h1 className="text-lg font-bold text-gray-900">アフィリエイト</h1>
+          <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+            案件に参加して、SNSごとに紹介リンクを作成できます。
+          </p>
+        </div>
+        <button onClick={handleRegister} disabled={registerBusy} className="af-primary-btn">
+          {registerBusy ? '登録中…' : 'はじめる'}
         </button>
       </div>
     );
@@ -419,6 +469,24 @@ export default function Affiliate() {
   const { links, offers } = state;
   const atLimit = links.length >= 20;
 
+  // Newest-first from the API; render oldest-first inside each offer so a stable
+  // reading order matches issuance order.
+  const orderedLinks = [...links].reverse();
+  const linksByOffer = new Map<string, AffiliateLinkData[]>();
+  const genericLinks: AffiliateLinkData[] = [];
+  for (const l of orderedLinks) {
+    if (l.offerId) {
+      const arr = linksByOffer.get(l.offerId) ?? [];
+      arr.push(l);
+      linksByOffer.set(l.offerId, arr);
+    } else {
+      genericLinks.push(l);
+    }
+  }
+
+  const enrolledOffers = offers.filter((o) => o.enrolled);
+  const availableOffers = offers.filter((o) => !o.enrolled);
+
   function handleOfferEnrolled(newLink: AffiliateLinkData) {
     setState((prev) => {
       if (prev.phase !== 'registered') return prev;
@@ -427,70 +495,78 @@ export default function Affiliate() {
           ? { ...o, enrolled: true, refCode: newLink.refCode, url: newLink.url }
           : o,
       );
-      return {
-        ...prev,
-        links: [...prev.links, newLink],
-        offers: updatedOffers,
-      };
+      return { ...prev, links: [...prev.links, newLink], offers: updatedOffers };
+    });
+  }
+
+  function handleLinkAdded(newLink: AffiliateLinkData) {
+    setState((prev) => {
+      if (prev.phase !== 'registered') return prev;
+      return { ...prev, links: [...prev.links, newLink] };
     });
   }
 
   return (
-    <div className="max-w-md mx-auto p-4 pb-12 space-y-4">
-      <h1 className="text-lg font-bold">アフィリエイト</h1>
+    <div className="af-fade-in max-w-md mx-auto p-4 pb-12 space-y-5" style={{ background: '#f7f8fa', minHeight: '100vh' }}>
+      <h1 className="text-lg font-bold text-gray-900">アフィリエイト</h1>
 
-      {/* Offers section */}
-      {offers.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-gray-700">案件</h2>
-          {offers.map((offer) => (
+      {/* 参加中の案件 — 案件ごとにリンクをまとめる */}
+      {enrolledOffers.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+            参加中の案件
+          </h2>
+          {enrolledOffers.map((offer) => (
             <OfferCard
               key={offer.id}
               offer={offer}
+              offerLinks={linksByOffer.get(offer.id) ?? []}
+              atLimit={atLimit}
               onEnrolled={handleOfferEnrolled}
+              onLinkAdded={handleLinkAdded}
             />
           ))}
         </section>
       )}
 
-      {/* Link list */}
-      <section className="space-y-2">
-        <h2 className="text-sm font-semibold text-gray-700">紹介リンク一覧</h2>
-        {links.length === 0 ? (
-          <div className="text-sm text-gray-500 py-4 text-center">リンクがまだありません</div>
-        ) : (
-          links.map((link) => <LinkRow key={link.refCode} link={link} />)
-        )}
-      </section>
-
-      {/* Add link form */}
-      <section className="border rounded p-3 space-y-2">
-        <h2 className="text-sm font-semibold text-gray-700">リンクを追加</h2>
-        {atLimit ? (
-          <div className="text-sm text-red-600">リンクの上限（20本）に達しています</div>
-        ) : (
-          <>
-            <input
-              type="text"
-              value={addLabel}
-              onChange={(e) => setAddLabel(e.target.value)}
-              placeholder="ラベル（任意）"
-              className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-              disabled={addBusy}
+      {/* 参加できる案件 */}
+      {availableOffers.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+            参加できる案件
+          </h2>
+          {availableOffers.map((offer) => (
+            <OfferCard
+              key={offer.id}
+              offer={offer}
+              offerLinks={[]}
+              atLimit={atLimit}
+              onEnrolled={handleOfferEnrolled}
+              onLinkAdded={handleLinkAdded}
             />
-            {addError && (
-              <div className="text-xs text-red-600">{addError}</div>
-            )}
-            <button
-              onClick={handleAddLink}
-              disabled={addBusy}
-              className="w-full bg-blue-600 text-white py-2 rounded text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-            >
-              {addBusy ? '追加中...' : 'リンクを追加する'}
-            </button>
-          </>
-        )}
-      </section>
+          ))}
+        </section>
+      )}
+
+      {/* その他のリンク — 案件に紐づかない既存の汎用リンクのみ表示（新規発行 UI なし） */}
+      {genericLinks.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1">
+            その他のリンク
+          </h2>
+          <div className="af-card space-y-2">
+            {genericLinks.map((link) => (
+              <LinkRow key={link.refCode} link={link} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {offers.length === 0 && genericLinks.length === 0 && (
+        <div className="af-card text-center text-sm text-gray-500">
+          現在参加できる案件はありません
+        </div>
+      )}
     </div>
   );
 }
