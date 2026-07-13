@@ -4,6 +4,16 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 
+const NO_ENV_OVERRIDE = { baseUrl: false, apiKey: false, model: false }
+
+function EnvOverrideBadge({ label }: { label: string }) {
+  return (
+    <span className="ml-2 inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-medium align-middle">
+      {label}
+    </span>
+  )
+}
+
 export default function OpenAIConnectionSetting() {
   const { t } = useI18n()
   const [baseUrl, setBaseUrl] = useState('')
@@ -14,6 +24,7 @@ export default function OpenAIConnectionSetting() {
   const [effectiveBaseUrl, setEffectiveBaseUrl] = useState<string | null>(null)
   const [effectiveModel, setEffectiveModel] = useState<string | null>(null)
   const [hasEffectiveApiKey, setHasEffectiveApiKey] = useState(false)
+  const [envOverride, setEnvOverride] = useState(NO_ENV_OVERRIDE)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -29,6 +40,7 @@ export default function OpenAIConnectionSetting() {
         setEffectiveBaseUrl(res.data.effectiveBaseUrl ?? null)
         setEffectiveModel(res.data.effectiveModel ?? null)
         setHasEffectiveApiKey(Boolean(res.data.hasEffectiveApiKey))
+        setEnvOverride(res.data.envOverride ?? NO_ENV_OVERRIDE)
       }
     } catch {
       // ignore and keep defaults
@@ -88,11 +100,14 @@ export default function OpenAIConnectionSetting() {
     <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
       <h3 className="text-sm font-semibold text-gray-800 mb-1">{t('OpenAI 接続設定（チャット自動返信）')}</h3>
       <p className="text-xs text-gray-500 mb-3">
-        {t('未設定時は環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL を使用します。')}
+        {t('サーバー環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL が設定されている場合は、ここで保存した値よりも環境変数が優先されます。')}
       </p>
       <div className="space-y-3">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">OPENAI_BASE_URL</label>
+          <label className="block text-xs text-gray-500 mb-1">
+            OPENAI_BASE_URL
+            {envOverride.baseUrl && <EnvOverrideBadge label={t('サーバー環境変数で上書き中')} />}
+          </label>
           <input
             type="url"
             value={baseUrl}
@@ -102,7 +117,10 @@ export default function OpenAIConnectionSetting() {
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">OPENAI_MODEL</label>
+          <label className="block text-xs text-gray-500 mb-1">
+            OPENAI_MODEL
+            {envOverride.model && <EnvOverrideBadge label={t('サーバー環境変数で上書き中')} />}
+          </label>
           <input
             type="text"
             value={model}
@@ -112,7 +130,10 @@ export default function OpenAIConnectionSetting() {
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">OPENAI_API_KEY</label>
+          <label className="block text-xs text-gray-500 mb-1">
+            OPENAI_API_KEY
+            {envOverride.apiKey && <EnvOverrideBadge label={t('サーバー環境変数で上書き中')} />}
+          </label>
           <input
             type="password"
             value={apiKey}

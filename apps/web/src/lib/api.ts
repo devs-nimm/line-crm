@@ -434,6 +434,7 @@ export const api = {
         effectiveBaseUrl: string | null;
         effectiveModel: string | null;
         hasEffectiveApiKey: boolean;
+        envOverride?: { baseUrl: boolean; apiKey: boolean; model: boolean };
       } }>('/api/account-settings/openai'),
     updateOpenAIConnection: (input: {
       baseUrl: string;

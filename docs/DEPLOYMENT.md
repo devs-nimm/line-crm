@@ -118,6 +118,38 @@ git push origin main
 
 ---
 
+## Method 4 — Admin dashboard on Vercel (alternative to Cloudflare Pages)
+
+The admin dashboard is a plain Next.js static export, so it can live on Vercel
+instead of Cloudflare Pages — typically paired with the self-hosted Docker
+backend (`docs/DOCKER.md`) running on a VPS. `apps/web/vercel.json` already
+carries the monorepo install/build commands; you only configure the project.
+
+1. **Create the Vercel project** (dashboard → Add New → Project, import the
+   repo) and set:
+   - **Root Directory**: `apps/web` (leave "Include source files outside of the
+     Root Directory" enabled — the build needs the workspace packages).
+   - **Framework Preset**: Next.js (auto-detected).
+   - **Environment variable**: `NEXT_PUBLIC_API_URL` = your backend's public
+     HTTPS URL (e.g. `https://api.example.com`), no trailing slash.
+2. **Allow the Vercel origin on the backend** (CORS + cross-site cookies). In
+   the backend `.env` (docker-compose) or Worker vars:
+   ```bash
+   ADMIN_ORIGIN=https://your-admin.vercel.app   # comma-separated, no trailing slash
+   ADMIN_ALLOW_CROSS_SITE=true                  # admin and API are on different sites
+   ```
+   Restart the backend (`docker compose up -d`) after changing `.env`.
+3. **Deploy.** Vercel's Git integration builds on every push to the production
+   branch; nothing is needed in GitHub Actions. The existing Cloudflare Pages
+   workflow stays gated behind `LINE_HARNESS_CLOUDFLARE_DEPLOY=true`, so the
+   two targets don't conflict.
+
+The API-key / cookie authentication between admin and backend is unchanged —
+only the origin allowlist needs the new domain. The LIFF app (`apps/liff`)
+still targets Cloudflare Pages; its final home is an open point.
+
+---
+
 ## Which method should I use?
 
 - **Just want the latest official release** → Method 1 (`create-line-harness update`).

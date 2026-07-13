@@ -138,6 +138,7 @@ accountSettings.get('/api/account-settings/openai', async (c) => {
       effectiveBaseUrl: effective.baseUrl,
       effectiveModel: effective.model,
       hasEffectiveApiKey: Boolean((effective.apiKey ?? '').trim()),
+      envOverride: effective.envOverride,
     },
   });
 });
