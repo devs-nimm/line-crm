@@ -55,6 +55,33 @@ describe('GET /api/account-settings/openai', () => {
     expect(body.success).toBe(true);
     expect(body.data.hasApiKey).toBe(true);
     expect(body.data.apiKey).toBeUndefined();
+    expect(body.data.envOverride).toEqual({ baseUrl: false, apiKey: false, model: false });
+    expect(body.data.effectiveBaseUrl).toBe('https://example.com/v1');
+    expect(body.data.effectiveModel).toBe('gpt-test');
+  });
+
+  it('env vars override admin-saved values per variable and are flagged', async () => {
+    dbMocks.getOpenAIConnectionSettings.mockResolvedValue({
+      baseUrl: 'https://db.example.com/v1',
+      model: 'db-model',
+      apiKey: 'sk-db',
+    });
+
+    const app = setupApp({
+      DB: {} as D1Database,
+      OPENAI_BASE_URL: 'https://env.example.com/v1',
+      OPENAI_MODEL: '   ', // blank env var does NOT override
+    });
+    const res = await app.request('/api/account-settings/openai');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { data: Record<string, unknown> };
+    expect(body.data.effectiveBaseUrl).toBe('https://env.example.com/v1');
+    expect(body.data.effectiveModel).toBe('db-model');
+    expect(body.data.hasEffectiveApiKey).toBe(true);
+    expect(body.data.envOverride).toEqual({ baseUrl: true, apiKey: false, model: false });
+    // Admin-saved values are still returned for editing
+    expect(body.data.baseUrl).toBe('https://db.example.com/v1');
+    expect(body.data.model).toBe('db-model');
   });
 });
 

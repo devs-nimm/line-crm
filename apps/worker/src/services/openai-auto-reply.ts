@@ -1,7 +1,7 @@
 import {
   getEffectiveOpenAISettings,
   type EffectiveOpenAISettings,
-  type OpenAIEnvFallback,
+  type OpenAIEnvSettings,
 } from '../lib/openai-settings.js';
 
 const MAX_INPUT_CHARS = 4000;
@@ -62,7 +62,7 @@ function isReplyTokenExpiredError(err: unknown): boolean {
 }
 
 export async function generateOpenAIReply(
-  settings: EffectiveOpenAISettings,
+  settings: Pick<EffectiveOpenAISettings, 'baseUrl' | 'apiKey' | 'model'>,
   incomingText: string,
   previousResponseId: string | null,
 ): Promise<{ text: string; responseId: string | null } | null> {
@@ -116,7 +116,7 @@ interface ReplyCapableLineClient {
 
 interface AutoReplyArgs {
   db: D1Database;
-  env: OpenAIEnvFallback;
+  env: OpenAIEnvSettings;
   lineClient: ReplyCapableLineClient;
   friendId: string;
   lineUserId: string;
