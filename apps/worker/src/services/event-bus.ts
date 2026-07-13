@@ -83,12 +83,17 @@ async function fireOutgoingWebhooks(
 ): Promise<void> {
   try {
     const webhooks = await getActiveOutgoingWebhooksByEvent(db, eventType);
+    // Never leak the single-use LINE reply token to external URLs. No
+    // webhook-based replier consumes it anymore (LLM replies route through the
+    // backend only — MIN-256); it stays on `payload` solely for in-process
+    // automations (send_message reply action).
+    const { replyToken: _replyToken, ...safeData } = payload;
     for (const wh of webhooks) {
       try {
         const body = JSON.stringify({
           event: eventType,
           timestamp: jstNow(),
-          data: payload,
+          data: safeData,
         });
 
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };

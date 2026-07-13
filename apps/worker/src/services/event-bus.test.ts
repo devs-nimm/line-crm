@@ -225,3 +225,46 @@ describe('fireEvent — send_message action logging', () => {
     expect(String(captured[0].binds[3])).toContain('from-template');
   });
 });
+
+describe('fireEvent — outgoing webhook never leaks replyToken (MIN-256)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('omits replyToken from the outgoing webhook payload while keeping other data', async () => {
+    const db = await import('@line-crm/db');
+    (db.getActiveOutgoingWebhooksByEvent as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue([
+      { id: 'wh-1', url: 'https://example.test/hook', secret: null },
+    ]);
+    (db.getActiveAutomationsByEvent as unknown as { mockResolvedValue: (v: unknown) => void }).mockResolvedValue([]);
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response('ok'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const dbFake = fakeDb({ friend: { line_user_id: 'U_test' }, capturedInserts: [] });
+    await fireEvent(
+      dbFake,
+      'message_received',
+      {
+        friendId: 'friend-1',
+        eventData: { text: 'hi', matched: false },
+        replyToken: 'secret-reply-token',
+      },
+      'channel-token',
+      'acc-1',
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://example.test/hook');
+    const sent = JSON.parse((init as { body: string }).body);
+    expect(sent.event).toBe('message_received');
+    expect(sent.data.replyToken).toBeUndefined();
+    // Other payload fields survive.
+    expect(sent.data.friendId).toBe('friend-1');
+    expect(sent.data.eventData.text).toBe('hi');
+    // The raw token string must not appear anywhere in the body.
+    expect((init as { body: string }).body).not.toContain('secret-reply-token');
+  });
+});
