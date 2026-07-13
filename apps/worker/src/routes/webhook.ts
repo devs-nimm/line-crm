@@ -22,6 +22,7 @@ import {
 } from '@line-crm/db';
 import type { EntryRoute, Friend } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
+import { maybeSendOpenAIAutoReply } from '../services/openai-auto-reply.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 
@@ -164,7 +165,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, c.env.IMAGES);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, c.env.IMAGES);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -182,6 +183,7 @@ async function handleEvent(
   event: WebhookEvent,
   lineAccessToken: string,
   lineAccountId: string | null = null,
+  env: Env['Bindings'],
   workerUrl?: string,
   liffUrl?: string,
   r2?: R2Bucket,
@@ -664,6 +666,28 @@ async function handleEvent(
 
         matched = true;
         break;
+      }
+    }
+
+    if (!matched) {
+      try {
+        const aiResult = await maybeSendOpenAIAutoReply({
+          db,
+          env,
+          lineClient,
+          friendId: friend.id,
+          lineUserId: friend.line_user_id,
+          incomingText,
+          replyToken: event.replyToken,
+          lineAccountId,
+          createdAt: jstNow(),
+        });
+        if (aiResult.matched) {
+          matched = true;
+          replyTokenConsumed = aiResult.replyTokenConsumed;
+        }
+      } catch (err) {
+        console.error('Failed to send OpenAI auto-reply', err);
       }
     }
 
