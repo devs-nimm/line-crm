@@ -1,178 +1,247 @@
-🌐 **日本語** | [English](README.en.md) | [简体中文](README.zh-CN.md) | [한국어](README.ko.md) | [Español](README.es.md)
+🌐 **English** | [日本語](README.ja.md)
 
 # LINE Harness
 
-> ### **[LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)** 👈
+> ### **[Try it free on LINE](https://shudesu.github.io/line-harness-oss/)** 👈
 
-LINE 公式アカウントの完全オープンソース CRM。**L社 / U社 の無料代替**。
-Cloudflare 無料枠で動く。サーバー代 **0 円**。Claude Code から全操作可能。
+A fully open-source CRM for LINE Official Accounts — a **free alternative to paid LINE CRM SaaS** (typically ¥10,000–20,000+/month). Step delivery, broadcasts, forms, rich menus, scoring, automation, multi-account management, and full Claude Code (AI) integration.
 
-### ▶️ [動画で見る (YouTube・約20分)](https://youtu.be/DiRuGaeq1sM)
-
-[![クリックで YouTube を再生 — LINE Harness 導入の全手順](https://img.youtube.com/vi/DiRuGaeq1sM/maxresdefault.jpg)](https://youtu.be/DiRuGaeq1sM)
-
-**現バージョン**: v0.14.1 ・ MIT License ・ TypeScript / Cloudflare Workers + D1
+**Current version**: v0.17.0 ・ MIT License ・ TypeScript
 
 ---
 
-## なぜ LINE Harness？
+## Why LINE Harness?
 
-| | L社 | U社 | **LINE Harness** |
+| | Paid SaaS A | Paid SaaS B | **LINE Harness** |
 |---|---|---|---|
-| 月額 | 2万円〜 | 1万円〜 | **0円** |
-| ステップ配信 | ✅ | ✅ | ✅ |
-| セグメント配信 | ✅ | ✅ | ✅ |
-| リッチメニュー切替 | ✅ | ✅ | ✅ |
-| フォーム (LIFF) | ✅ | ✅ | ✅ |
-| スコアリング | ✅ | ❌ | ✅ |
-| IF-THEN 自動化 | 一部 | 一部 | ✅ |
-| API 公開 | ❌ | ❌ | **全機能** |
-| Claude Code (AI) 対応 | ❌ | ❌ | **MCP server 同梱** |
-| BAN 検知 & 自動アカウント切替 | ❌ | ❌ | **✅** |
-| マルチアカウント | 別契約 | 別契約 | **標準搭載** |
-| 友だち重複検出 | ❌ | ❌ | **✅** (picture_url トークン照合) |
-| ソースコード | 非公開 | 非公開 | **MIT (このリポ)** |
+| Monthly cost | ¥20,000+ | ¥10,000+ | **$0** |
+| Step messaging | ✅ | ✅ | ✅ |
+| Segment broadcasts | ✅ | ✅ | ✅ |
+| Rich menu switching | ✅ | ✅ | ✅ |
+| Forms (LIFF) | ✅ | ✅ | ✅ |
+| Lead scoring | ✅ | ❌ | ✅ |
+| IF-THEN automation | partial | partial | ✅ |
+| Public API | ❌ | ❌ | **all features** |
+| Claude Code (AI) integration | ❌ | ❌ | **MCP server included** |
+| BAN detection & account migration | ❌ | ❌ | **✅** |
+| Multi-account | extra contract | extra contract | **built-in** |
+| Friend deduplication | ❌ | ❌ | **✅** (cross-account, picture token matching) |
+| Source code | closed | closed | **MIT (this repo)** |
 
 ---
 
-## クイックスタート
+## Architecture
 
-### 1 コマンドで完全セットアップ
+LINE Harness has two runtime pieces:
+
+```
+[ LINE Platform ] ⇄ [ Backend: Hono API (apps/worker) ] ⇄ [ PostgreSQL ]
+                                  ⇅                          [ MinIO / S3 ]
+                     [ Admin dashboard: Next.js (apps/web) ]
+                                  ⇅
+                     [ MCP Server / SDK / Claude Code ]
+```
+
+- **Backend** (`apps/worker`) — Hono app: REST API, LINE webhook receiver, LIFF pages, and in-process cron (step delivery, broadcasts, reminders). Runs as a Node.js process in Docker with PostgreSQL and MinIO (S3-compatible object storage). A legacy Cloudflare Workers + D1 + R2 deployment path also exists (`docs/DEPLOYMENT.md`).
+- **Admin dashboard** (`apps/web`) — Next.js 15 static export. Talks to the backend over `NEXT_PUBLIC_API_URL`. Host it on Vercel (recommended, see below) or Cloudflare Pages; the Docker backend also serves the SPA itself at its root URL.
+
+---
+
+## Backend: deploy with Docker Compose
+
+Full guide: [docs/DOCKER.md](docs/DOCKER.md)
+
+### Prerequisites
+
+- A VPS (or any host) with Docker + Docker Compose
+- A LINE Official Account with a Messaging API channel ([LINE Developers console](https://developers.line.biz/))
+- A domain name — LINE only delivers webhooks to valid HTTPS endpoints
+
+### Steps
+
+```bash
+git clone https://github.com/devs-nimm/line-harness-oss.git
+cd line-harness-oss
+
+cp .env.example .env
+# edit .env — see the variable table below
+
+docker compose up -d --build
+curl http://localhost:8787/api/health
+# → {"success":true,"data":{"status":"ok"}}
+```
+
+This starts three services:
+
+| Service | What | Port (host) |
+|---|---|---|
+| `backend` | Hono app on Node — API + admin SPA | `${BACKEND_PORT:-8787}` |
+| `postgres` | PostgreSQL 16 (database) | `${POSTGRES_PORT:-5432}` |
+| `minio` | S3-compatible object storage (images) | 9000 / console 9001 |
+
+Schema migrations apply automatically on every container boot (idempotent) — no manual migration step.
+
+### TLS reverse proxy (required)
+
+Put a reverse proxy with a real certificate in front of the backend. Caddy is the least-effort option:
+
+```
+# /etc/caddy/Caddyfile
+line.example.com {
+    reverse_proxy localhost:8787
+}
+```
+
+Then:
+
+1. Point DNS `line.example.com` → your server.
+2. Set `WORKER_URL=https://line.example.com` in `.env` and run `docker compose up -d` again.
+3. In the LINE Developers console (Messaging API → Webhook settings), set the webhook URL to `https://line.example.com/webhook` and verify.
+
+### Backend `.env` variables
+
+Required — the stack will not work without these:
+
+| Variable | What |
+|---|---|
+| `POSTGRES_PASSWORD` | PostgreSQL password. Also update it inside `DATABASE_URL`. |
+| `API_KEY` | Admin/API key for the dashboard, SDK, and MCP server. Pick a long random string. |
+| `LINE_CHANNEL_ACCESS_TOKEN` | Messaging API channel access token (LINE Developers console). |
+| `LINE_CHANNEL_SECRET` | Messaging API channel secret (LINE Developers console). |
+| `WORKER_URL` | Public HTTPS URL of the backend, e.g. `https://line.example.com`. |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-storage credentials. Change from the `minioadmin` defaults; these also become MinIO's root user/password. |
+
+Common optional:
+
+| Variable | What |
+|---|---|
+| `ADMIN_ORIGIN` | Comma-separated allowlist of admin-dashboard origins (no trailing slash), e.g. `https://your-admin.vercel.app`. Needed when the dashboard is hosted on a different domain (Vercel/Pages). |
+| `ADMIN_ALLOW_CROSS_SITE` | `true` when admin and API are on different sites (Vercel ↔ VPS) — issues `SameSite=None; Secure` session cookies. |
+| `LINE_LOGIN_CHANNEL_ID` / `LINE_LOGIN_CHANNEL_SECRET` | LINE Login channel, used by LIFF forms/auth. |
+| `LIFF_URL` | Your LIFF app URL (`https://liff.line.me/<liff-id>`). |
+| `S3_ENDPOINT` / `S3_BUCKET` / `S3_REGION` / `S3_FORCE_PATH_STYLE` | Object-storage location. Defaults target the bundled MinIO; point at AWS S3/R2 instead if you prefer. |
+| `POSTGRES_USER` / `POSTGRES_DB` / `POSTGRES_PORT` / `DATABASE_URL` | Database identity/connection. `DATABASE_URL` as written in `.env` is only used when running the backend on the host; inside docker-compose it is overridden to point at the `postgres` service. |
+| `BACKEND_PORT` | Host port the backend is published on (container listens on 8787). |
+| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | OpenAI-compatible chat auto-reply. Values here override the admin-UI global settings per variable. |
+| `STRIPE_WEBHOOK_SECRET` | Only if you use the Stripe webhook-in integration. |
+| `X_HARNESS_URL` | Optional cross-Harness account linking. |
+
+### Updating
+
+```bash
+git pull
+docker compose up -d --build   # migrations apply automatically on boot
+```
+
+### Backups
+
+The named volumes `pgdata` and `minio-data` are the only state — back them up together:
+
+```bash
+docker compose exec postgres pg_dump -U postgres linecrm | gzip > backup.sql.gz
+# plus a copy/rclone sync of the minio-data volume
+```
+
+---
+
+## Frontend (Admin): deploy on Vercel
+
+The admin dashboard is a plain Next.js static export, so it deploys to Vercel with no server config. Full guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (Method 4).
+
+1. **Create the Vercel project** — dashboard → *Add New → Project*, import this repo, and set:
+   - **Root Directory**: `apps/web` (keep "Include source files outside of the Root Directory" enabled — the build needs the workspace packages)
+   - **Framework Preset**: Next.js (auto-detected)
+2. **Set the environment variable on the Vercel dashboard** (*Project → Settings → Environment Variables*):
+
+   | Variable | Value |
+   |---|---|
+   | `NEXT_PUBLIC_API_URL` | Your backend's public HTTPS URL, e.g. `https://line.example.com` — no trailing slash |
+
+   This is the **only** env var the frontend needs.
+3. **Allow the Vercel origin on the backend** — in the backend `.env`:
+
+   ```bash
+   ADMIN_ORIGIN=https://your-admin.vercel.app
+   ADMIN_ALLOW_CROSS_SITE=true
+   ```
+
+   then `docker compose up -d` to restart.
+4. **Deploy.** Vercel builds on every push to the production branch.
+
+---
+
+## Alternative: Cloudflare one-command setup
+
+The original Cloudflare deployment (Workers + D1 + R2 + Pages, free tier) still works:
 
 ```bash
 npx create-line-harness
 ```
 
-CLI が以下を全部やる:
-- Cloudflare アカウント認証 (wrangler login)
-- D1 データベース作成 + スキーマ・マイグレーション適用
-- Worker / 管理画面のデプロイ
-- LINE 公式アカウントの credentials 登録
-- LIFF アプリの自動作成
-- 管理画面初回ログイン用 Owner ユーザー作成
-
-所要時間: 約 5 分。完了すれば管理画面 (`https://<your-name>-admin.pages.dev`) で即運用開始。
-
-### 必要なもの
-
-- Cloudflare アカウント（無料枠で OK）
-- LINE 公式アカウント + Messaging API channel
-- Node.js 22+ / pnpm
+The CLI handles Cloudflare auth, D1 creation + migrations, Worker/dashboard deploys, LINE credentials, LIFF app creation, and the initial Owner user (~5 min). See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 
-## 主要機能
+## Key features
 
-### 配信
-- **ステップ配信** — `delay_minutes` で分単位制御、条件分岐、ステルス送信
-- **ブロードキャスト** — 全員 / タグ / セグメント、即時 or 予約、500 人超は自動キュー化
-- **リマインダー** — 指定日時からのカウントダウン配信（セミナー 3 日前 / 1 日前 / 当日）
-- **テンプレート** — `{{name}}` `{{uid}}` `{{auth_url:CHANNEL_ID}}` で個別パーソナライズ
-- **トラッキングリンク** — クリック計測 → 自動タグ付け → シナリオ起動
+### Delivery
+- **Step campaigns** — minute-level `delay_minutes` control, conditional branching, stealth sends
+- **Broadcasts** — all / tag / segment targeting, immediate or scheduled, auto-queued past 500 recipients
+- **Reminders** — countdown delivery toward a target date (3 days before / 1 day before / day-of)
+- **Templates** — personalization with `{{name}}` `{{uid}}` `{{auth_url:CHANNEL_ID}}`
+- **Tracked links** — click measurement → auto-tagging → scenario triggers
 
 ### CRM
-- **友だち管理** — Webhook 自動登録、プロフィール取得、カスタムメタデータ
-- **タグ** — 配信条件・シナリオトリガー
-- **スコアリング** — 行動ベースのリードスコア自動計算
-- **オペレーターチャット** — 管理画面から直接 1:1 返信
-- **Conversation Inbox** — 未返信の会話を放置時間順で一覧（自動配信は除外判定）
-- **重複検出** — `picture_url` 中間トークンで複数アカウント間の同一ユーザーを自動タグ付け
+- **Friend management** — auto-registration via webhook, profile capture, custom metadata
+- **Tags & scoring** — delivery conditions, scenario triggers, behavior-based lead scores
+- **Operator chat & Conversation Inbox** — 1:1 replies from the dashboard, unanswered conversations sorted by idle time
+- **Duplicate detection** — same user across multiple accounts auto-tagged via `picture_url` token matching
 
-### マーケティング
-- **リッチメニュー** — ユーザー別 / タグ別の自動切替
-- **フォーム (LIFF)** — LINE 内完結フォーム、回答 → メタデータ自動保存
-- **カレンダー予約** — Google Calendar 連携の予約システム (LIFF)
-- **スタッフ管理** — Owner / Admin / Staff の 3 ロール、API key 個別発行
+### Marketing
+- **Rich menus** — automatic per-user / per-tag switching
+- **Forms (LIFF)** — in-LINE forms, answers saved to metadata automatically
+- **Calendar booking** — Google Calendar-backed booking (LIFF)
+- **Staff management** — Owner / Admin / Staff roles with individual API keys
 
-### アフィリエイト計測（ASP）
-- **アフィリリンク発行** — アフィリエイター自身が LIFF からワンタップで発行、短縮ドメイン対応
-- **案件管理** — 案件ごとの固定額報酬を設定、複数案件を並列運用
-- **時系列トラッキング** — クリック → 友だち追加 → CV を時系列で記録、last-touch 帰属で成果紐づけ
-- **成果承認フロー** — 帰属 CV を承認/却下して報酬を確定、重複アカウント検知フラグで水増しを可視化
-- **LINE push 通知** — 成果確定時にアフィリエイターへ自動プッシュ通知
-- 詳細: [docs/wiki/27-Affiliate-ASP.md](docs/wiki/27-Affiliate-ASP.md)
+### Affiliate tracking (ASP)
+- Affiliate link issuing (one tap from LIFF), per-offer fixed rewards, click → friend-add → CV timeline tracking with last-touch attribution, approval flow, LINE push on confirmation. Details: [docs/wiki/27-Affiliate-ASP.md](docs/wiki/27-Affiliate-ASP.md)
 
-### 自動化
-- **IF-THEN ルール** — 7 種のトリガー × 6 種のアクション
-- **自動返信** — キーワード完全一致 / 部分一致
-- **Webhook IN/OUT** — Stripe / Slack 等の外部サービス連携
-- **通知ルール** — 条件付きアラート配信
-- **配信タイミング** — `delay_minutes` と `scheduled_at` で完全制御（v0.13.2 で時間ゲート全廃、運用側ハンドル）
+### Automation
+- **IF-THEN rules** — 7 trigger types × 6 action types
+- **Auto-replies** — exact / partial keyword match
+- **Webhook IN/OUT** — Stripe, Slack, and other external integrations
+- **Notification rules** — conditional alerts
 
-### マルチアカウント
-- **複数 LINE 公式アカウント** を 1 つのダッシュボードで管理
-- **アカウント別シナリオ・タグ・配信** スコープ
-- **BAN 検知** → 自動で次のアカウントへ友だち移行（pool 機能）
-- **トラフィックプール** — 複数アカウントへ自動振り分け
+### Multi-account
+- Multiple LINE Official Accounts in one dashboard, per-account scenarios/tags/broadcasts, **BAN detection** with automatic friend migration to the next account, traffic pooling
 
-### AI 統合
-- **MCP Server 同梱** (`@line-harness/mcp-server`) — Claude Code から自然言語で全操作
-  - `list_conversations` / `get_conversation` — 未返信会話の AI 監視
-  - `create_scenario` / `update_step` — シナリオを AI に作らせる
-  - `broadcast` / `send_message` — メッセージ送信（要ユーザー確認）
-- **公式 SDK** (`@line-harness/sdk`) — TypeScript の型付き SDK、ESM + CJS、ゼロ依存
-
-### iOS アプリ対応
-- **`GET /api/capabilities`** — iOS 公式アプリ (the-harness-ios) との互換判定エンドポイント
-- Owner / Admin / Staff いずれのロールでも利用可能
+### AI integration
+- **MCP server included** (`@line-harness/mcp-server`) — operate everything from Claude Code in natural language
+- **Typed SDK** (`@line-harness/sdk`) — TypeScript, ESM + CJS, zero dependencies
 
 ---
 
-## アーキテクチャ
+## Documentation
 
-```
-[ LINE Platform ] ⇄ [ Cloudflare Worker (Hono) ] ⇄ [ D1 SQLite ]
-                              ⇅
-                    [ Cloudflare Pages (Next.js 15) ]
-                              ⇅
-                    [ MCP Server / SDK / Claude Code ]
-```
-
-- **Worker** (`apps/worker`): API + LIFF + Webhook 受信、cron で配信処理
-- **Web** (`apps/web`): Next.js 15 ダッシュボード（19 セクション）
-- **Packages**:
-  - `@line-harness/sdk` — TypeScript SDK
-  - `@line-harness/mcp-server` — Claude Code 用 MCP server
-  - `create-line-harness` — セットアップ CLI
-  - `@line-harness/plugin-template` — プラグイン拡張用テンプレート
-  - `@line-harness/db` — D1 マイグレーション + ヘルパー
-  - `@line-harness/line-sdk` — LINE API 薄ラッパー
-  - `@line-harness/shared` — 型定義共有
+- [Docker self-hosting guide](docs/DOCKER.md) ・ [PostgreSQL guide](docs/POSTGRES.md) ・ [Deployment guide](docs/DEPLOYMENT.md)
+- [Wiki](docs/wiki/Home.md) — feature-by-feature manuals, API/SDK reference
+- npm: [@line-harness/sdk](https://www.npmjs.com/package/@line-harness/sdk) ・ [@line-harness/mcp-server](https://www.npmjs.com/package/@line-harness/mcp-server) ・ [create-line-harness](https://www.npmjs.com/package/create-line-harness)
 
 ---
 
-## ドキュメント
+## License
 
-- [セットアップガイド (動画)](https://youtu.be/DiRuGaeq1sM)
-- [LINE で無料体験する](https://shudesu.github.io/line-harness-oss/)
-- [npm: @line-harness/sdk](https://www.npmjs.com/package/@line-harness/sdk)
-- [npm: @line-harness/mcp-server](https://www.npmjs.com/package/@line-harness/mcp-server)
-- [npm: create-line-harness](https://www.npmjs.com/package/create-line-harness)
+MIT — free for commercial use, modification, and redistribution.
 
----
+## Contributing
 
-## ライセンス
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-MIT License. 商用利用・改変・再配布自由。
+## Author
 
----
+**Shuichi Noda (Shudesu)** — creator of the Harness series (LINE / IG / X Harness), CEO of AI Agent Inc.
 
-## コントリビュート
+- GitHub: [@Shudesu](https://github.com/Shudesu) ・ X: [@ai_shunoda](https://x.com/ai_shunoda)
+- Docs: [Harness Wiki](https://harness-wiki.pages.dev) ・ Pricing comparisons: [The Harness Lab](https://the-harness.com)
 
-Issue / PR 歓迎。OSS リポへの PR は `Shudesu/line-harness-oss` (このリポ) に投げてください。
-
----
-
-## 開発者 / Author
-
-**野田修一（Shudesu）** — Harness シリーズ（LINE Harness / IG Harness / X Harness）開発者、AIエージェント株式会社 代表
-
-- GitHub: [@Shudesu](https://github.com/Shudesu)
-- X: [@ai_shunoda](https://x.com/ai_shunoda)
-- YouTube: [野田 修一 | The Harnessで0円](https://www.youtube.com/@ai_nodashuichi)
-- 公式ドキュメント: [Harness Wiki](https://harness-wiki.pages.dev)
-- 商用ツールとの比較・料金データ: [The Harness Lab](https://the-harness.com)
-
----
-
-> **LINE Harness** by [@Shudesu](https://github.com/Shudesu) — AI ネイティブ時代の OSS LINE CRM
+> **LINE Harness** — the open-source LINE CRM for the AI-native era
