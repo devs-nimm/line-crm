@@ -78,9 +78,12 @@ function isNotFound(err: unknown): boolean {
 export function getImageStore(env: Bindings): ImageStore {
   if (env.IMAGES) return env.IMAGES;
 
-  const { client, bucket } = s3(env);
+  // Client is built lazily on first use so constructing the store never throws
+  // — callers that receive a store but never touch it (e.g. text-message
+  // webhooks) must not trip the "S3 not configured" guard.
   return {
     async put(key, data, opts) {
+      const { client, bucket } = s3(env);
       await client.send(
         new PutObjectCommand({
           Bucket: bucket,
@@ -93,6 +96,7 @@ export function getImageStore(env: Bindings): ImageStore {
     },
 
     async get(key) {
+      const { client, bucket } = s3(env);
       try {
         const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
         // images are ≤10MB (validated at upload); buffering the whole object
@@ -111,10 +115,12 @@ export function getImageStore(env: Bindings): ImageStore {
     },
 
     async delete(key) {
+      const { client, bucket } = s3(env);
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     },
 
     async list(prefix) {
+      const { client, bucket } = s3(env);
       const keys: string[] = [];
       let token: string | undefined;
       do {

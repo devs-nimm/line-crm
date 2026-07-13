@@ -40,9 +40,10 @@ describe('getImageStore', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  test('throws when S3 config missing and no injected store', () => {
+  test('constructing a store never throws; the S3-config guard fires on first op', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => getImageStore({} as any)).toThrow(/S3 storage not configured/);
+    const store = getImageStore({} as any); // must not throw (e.g. text webhooks never touch it)
+    await expect(store.get('k')).rejects.toThrow(/S3 storage not configured/);
   });
 
   test('put maps httpMetadata.contentType → ContentType and buffers ArrayBuffer', async () => {
