@@ -40,27 +40,28 @@ interface LineAccountListItem {
   ogDefaultImageUrl: string | null
 }
 
-const ccPrompts = [
-  {
-    title: 'LINEアカウント設定確認',
-    prompt: `現在登録されているLINEアカウントのチャネル設定を確認してください。
+export default function AccountsPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('LINEアカウント設定確認'),
+      prompt: t(`現在登録されているLINEアカウントのチャネル設定を確認してください。
 1. 各アカウントのChannel ID・名前・有効/無効ステータスを一覧表示
 2. Channel Access TokenとChannel Secretが正しく設定されているか検証
 3. LINE Developers Consoleとの設定整合性をチェック
-結果をレポートしてください。`,
-  },
-  {
-    title: 'アカウント追加手順',
-    prompt: `新しいLINEアカウントを追加する手順をガイドしてください。
+結果をレポートしてください。`),
+    },
+    {
+      title: t('アカウント追加手順'),
+      prompt: t(`新しいLINEアカウントを追加する手順をガイドしてください。
 1. LINE Developers Consoleでのチャネル作成手順を説明
 2. Channel ID、Channel Access Token、Channel Secretの取得方法
 3. CRMへの登録手順と初期設定のベストプラクティス
-手順を示してください。`,
-  },
-]
-
-export default function AccountsPage() {
-  const { t } = useI18n()
+手順を示してください。`),
+    },
+  ]
   const [accounts, setAccounts] = useState<LineAccountListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

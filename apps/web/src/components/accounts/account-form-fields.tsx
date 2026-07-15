@@ -226,7 +226,7 @@ export function AccountFormSections({
           <input
             type="text"
             value={state.ogSiteName ?? ''}
-            placeholder={`空欄なら「${state.name || 'アカウント名'}」がフォールバック`}
+            placeholder={t('空欄なら「{name}」がフォールバック').replace('{name}', state.name || t('アカウント名'))}
             onChange={(e) => update({ ogSiteName: e.target.value || null })}
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
           />

@@ -69,7 +69,7 @@ export default function AccountSettingsSection({
           >
             <option value="">{t('未設定')}</option>
             {COUNTRY_OPTIONS.map((c) => (
-              <option key={c} value={c}>{c} {countryFlag(c)}</option>
+              <option key={c} value={c}>{t(c)} {countryFlag(c)}</option>
             ))}
           </select>
           {select === 'その他' && (
