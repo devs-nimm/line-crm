@@ -436,6 +436,40 @@ export const en: Record<string, string> = {
   "https://example.com/preview.png (空欄で元画像と同じ)": "https://example.com/preview.png (same as original if blank)",
   "メッセージテキストを入力...": "Enter message text...",
 
+  // --- /accounts English support (MIN-279) ---
+  // CC prompt FAB + template titles/bodies (cc-prompt-button, /accounts page)
+  "CCに依頼": "Ask CC",
+  "LINEアカウント設定確認": "Check LINE account settings",
+  "アカウント追加手順": "How to add an account",
+  "現在登録されているLINEアカウントのチャネル設定を確認してください。\n1. 各アカウントのChannel ID・名前・有効/無効ステータスを一覧表示\n2. Channel Access TokenとChannel Secretが正しく設定されているか検証\n3. LINE Developers Consoleとの設定整合性をチェック\n結果をレポートしてください。": "Please review the channel settings of the currently registered LINE accounts.\n1. List each account's Channel ID, name, and enabled/disabled status\n2. Verify that the Channel Access Token and Channel Secret are set correctly\n3. Check consistency with the LINE Developers Console\nPlease report the results.",
+  "新しいLINEアカウントを追加する手順をガイドしてください。\n1. LINE Developers Consoleでのチャネル作成手順を説明\n2. Channel ID、Channel Access Token、Channel Secretの取得方法\n3. CRMへの登録手順と初期設定のベストプラクティス\n手順を示してください。": "Please guide me through the steps to add a new LINE account.\n1. Explain how to create a channel in the LINE Developers Console\n2. How to obtain the Channel ID, Channel Access Token, and Channel Secret\n3. Best practices for registering it in the CRM and initial setup\nPlease show the steps.",
+  // OGP site-name placeholder (account-form-fields) — {name} is interpolated at call site
+  "空欄なら「{name}」がフォールバック": "Falls back to \"{name}\" if left blank",
+  // Country select options (account-settings-section / country-flag COUNTRY_OPTIONS)
+  "日本": "Japan",
+  "タイ": "Thailand",
+  "台湾": "Taiwan",
+  "中国": "China",
+  "韓国": "Korea",
+  "アメリカ": "USA",
+  "その他": "Other",
+  // OpenAI connection card (openai-connection-setting)
+  "OpenAI 接続設定（チャット自動返信）": "OpenAI connection settings (chat auto-reply)",
+  "サーバー環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL が設定されている場合は、ここで保存した値よりも環境変数が優先されます。": "If the server environment variables OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL are set, they take precedence over the values saved here.",
+  "サーバー環境変数で上書き中": "Overridden by server environment variable",
+  "保存済みの API キーをクリアする": "Clear the saved API key",
+  "現在有効な設定": "Currently effective settings",
+  // Short-link / tracked-link domain cards (link-base-url-setting)
+  "アフィリリンクドメイン（全アカウント共通）": "Affiliate link domain (shared across all accounts)",
+  "アフィリエイト配布リンクに短縮ドメインを使う場合に設定。例:": "Set this if you use a short domain for affiliate distribution links. e.g.",
+  "メッセージ内リンクの短縮ドメイン（全アカウント共通）": "Short domain for in-message links (shared across all accounts)",
+  "配信メッセージの自動短縮リンク（/t/…）に使うドメイン。例:": "Domain used for auto-shortened links (/t/…) in broadcast messages. e.g.",
+  "リンクは": "links become",
+  "形式に。": "format.",
+  "そのドメインの": "That domain's",
+  "をパスそのまま Worker へ転送する設定（Redirect Rule 等）が必要。詳細は wiki「Tracked Links」参照": "must be forwarded to the Worker with the path preserved (e.g. a Redirect Rule). See the \"Tracked Links\" wiki for details.",
+  "https://go.example.com（空欄で Worker URL を使用）": "https://go.example.com (leave blank to use the Worker URL)",
+
   // --- Settings, Accounts & Auth feature area (MIN-244) ---
   "スタッフの読み込みに失敗しました": "Failed to load staff",
   "キー再生成に失敗しました": "Failed to regenerate key",
