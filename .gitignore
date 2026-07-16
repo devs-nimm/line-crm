@@ -19,3 +19,7 @@ apps/worker/dist/
 .claude/worktrees/
 .line-harness-setup.json
 .line-harness-config.json
+
+# Graphify knowledge-graph artifacts
+graphify-out/
+.graphify_cache/
