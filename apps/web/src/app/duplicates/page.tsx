@@ -34,15 +34,15 @@ interface DuplicatesStatsData {
   computedAt?: string
 }
 
-function formatRelative(iso: string): string {
+function formatRelative(iso: string, t: (key: string) => string): string {
   const elapsedMs = Date.now() - new Date(iso).getTime()
-  if (elapsedMs < 0) return 'たった今'
+  if (elapsedMs < 0) return t('たった今')
   const sec = Math.floor(elapsedMs / 1000)
-  if (sec < 60) return `${sec}秒前`
+  if (sec < 60) return `${sec}${t('秒前')}`
   const min = Math.floor(sec / 60)
-  if (min < 60) return `${min}分前`
+  if (min < 60) return `${min}${t('分前')}`
   const hr = Math.floor(min / 60)
-  return `${hr}時間前`
+  return `${hr}${t('時間前')}`
 }
 
 const fmt = new Intl.NumberFormat('ja-JP')
@@ -65,7 +65,7 @@ export default function DuplicatesPage() {
         setError(t('集計の取得に失敗しました'))
       }
     } catch {
-      setError('集計の取得に失敗しました')
+      setError(t('集計の取得に失敗しました'))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -137,7 +137,7 @@ export default function DuplicatesPage() {
             <div className="flex items-center gap-3">
               {data.computedAt && (
                 <span className="text-xs text-gray-400">
-                  {formatRelative(data.computedAt)}{t('に計算')}
+                  {formatRelative(data.computedAt, t)}{t('に計算')}
                 </span>
               )}
               <button

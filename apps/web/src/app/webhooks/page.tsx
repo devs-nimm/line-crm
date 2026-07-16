@@ -11,25 +11,6 @@ type Tab = 'incoming' | 'outgoing'
 
 const MIN_SECRET_LENGTH = 32
 
-const ccPrompts = [
-  {
-    title: 'Webhook設定ガイド',
-    prompt: `Webhookの設定手順をガイドしてください。
-1. 受信Webhook（Incoming）の作成とエンドポイントURLの設定方法
-2. 送信Webhook（Outgoing）のURL・イベントタイプ・シークレット設定
-3. LINE公式アカウントとのWebhook連携設定手順
-手順を示してください。`,
-  },
-  {
-    title: 'Webhookデバッグ',
-    prompt: `Webhookの動作確認とデバッグをサポートしてください。
-1. 受信・送信Webhookの有効/無効ステータスを確認
-2. Webhookのテスト送信と応答検証の手順
-3. よくあるエラーパターンとトラブルシューティング方法
-手順を示してください。`,
-  },
-]
-
 // Generate a 32-char URL-safe random secret in the browser. 24 random bytes
 // produce exactly 32 base64 characters; remap +/ to -/_ instead of stripping
 // so we always end up with 32 chars (stripping would drop the count).
@@ -51,6 +32,26 @@ function isHttpsUrl(value: string): boolean {
 
 export default function WebhooksPage() {
   const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('Webhook設定ガイド'),
+      prompt: t(`Webhookの設定手順をガイドしてください。
+1. 受信Webhook（Incoming）の作成とエンドポイントURLの設定方法
+2. 送信Webhook（Outgoing）のURL・イベントタイプ・シークレット設定
+3. LINE公式アカウントとのWebhook連携設定手順
+手順を示してください。`),
+    },
+    {
+      title: t('Webhookデバッグ'),
+      prompt: t(`Webhookの動作確認とデバッグをサポートしてください。
+1. 受信・送信Webhookの有効/無効ステータスを確認
+2. Webhookのテスト送信と応答検証の手順
+3. よくあるエラーパターンとトラブルシューティング方法
+手順を示してください。`),
+    },
+  ]
   const [tab, setTab] = useState<Tab>('incoming')
   const [incoming, setIncoming] = useState<IncomingWebhook[]>([])
   const [outgoing, setOutgoing] = useState<OutgoingWebhook[]>([])

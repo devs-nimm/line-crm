@@ -124,25 +124,6 @@ function formatYmdSlash(iso: string): string {
   return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
 }
 
-const ccPrompts = [
-  {
-    title: 'チャット対応テンプレート',
-    prompt: `チャット対応で使えるテンプレートメッセージを作成してください。
-1. よくある質問への回答テンプレート（挨拶、FAQ、サポート）
-2. クレーム対応用の丁寧な返信テンプレート
-3. フォローアップメッセージのテンプレート
-手順を示してください。`,
-  },
-  {
-    title: '未対応チャット確認',
-    prompt: `未対応のチャットを確認し、対応優先度を整理してください。
-1. 未読・対応中のチャット数を集計
-2. 最終メッセージからの経過時間で優先度を判定
-3. 長時間未対応のチャットへの対応アクションを提案
-結果をレポートしてください。`,
-  },
-]
-
 interface FriendItem {
   id: string
   displayName: string
@@ -316,6 +297,26 @@ function DirectMessagePanel({ friendId, friend, onBack, onSent }: {
 export default function ChatsPage() {
   const { selectedAccountId } = useAccount()
   const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('チャット対応テンプレート'),
+      prompt: t(`チャット対応で使えるテンプレートメッセージを作成してください。
+1. よくある質問への回答テンプレート（挨拶、FAQ、サポート）
+2. クレーム対応用の丁寧な返信テンプレート
+3. フォローアップメッセージのテンプレート
+手順を示してください。`),
+    },
+    {
+      title: t('未対応チャット確認'),
+      prompt: t(`未対応のチャットを確認し、対応優先度を整理してください。
+1. 未読・対応中のチャット数を集計
+2. 最終メッセージからの経過時間で優先度を判定
+3. 長時間未対応のチャットへの対応アクションを提案
+結果をレポートしてください。`),
+    },
+  ]
   const [chats, setChats] = useState<Chat[]>([])
   const [allFriends, setAllFriends] = useState<FriendItem[]>([])
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)

@@ -22,27 +22,28 @@ interface CreateFormState {
   scoreValue: string
 }
 
-const ccPrompts = [
-  {
-    title: 'スコアリングルール設計',
-    prompt: `スコアリングルールの設計をサポートしてください。
+export default function ScoringPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('スコアリングルール設計'),
+      prompt: t(`スコアリングルールの設計をサポートしてください。
 1. 主要なイベントタイプ別の推奨スコア値を提案
 2. 正のスコア（エンゲージメント）と負のスコア（離脱兆候）のバランス設計
 3. スコア閾値に基づくセグメント分類の推奨設定
-手順を示してください。`,
-  },
-  {
-    title: 'スコア分析レポート',
-    prompt: `現在のスコアリングデータを分析してください。
+手順を示してください。`),
+    },
+    {
+      title: t('スコア分析レポート'),
+      prompt: t(`現在のスコアリングデータを分析してください。
 1. ルール別のスコア付与回数と合計値を集計
 2. 有効・無効ルールの見直しと最適化提案
 3. スコア分布に基づく友だちのセグメント分析
-結果をレポートしてください。`,
-  },
-]
-
-export default function ScoringPage() {
-  const { t } = useI18n()
+結果をレポートしてください。`),
+    },
+  ]
   const [rules, setRules] = useState<ScoringRule[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

@@ -11,25 +11,6 @@ import BroadcastDetail from '@/components/broadcasts/broadcast-detail'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useI18n } from '@/lib/i18n'
 
-const ccPrompts = [
-  {
-    title: '配信メッセージを作成',
-    prompt: `一斉配信用のメッセージを作成してください。
-1. 配信目的: [目的を指定]
-2. ターゲット: 全員 / タグ指定
-3. メッセージタイプ: テキスト / 画像 / Flex
-効果的なメッセージ文面を提案してください。`,
-  },
-  {
-    title: '配信スケジュール最適化',
-    prompt: `配信スケジュールを最適化してください。
-1. 過去の配信実績から最適な時間帯を分析
-2. 曜日別の開封率を確認
-3. 推奨スケジュールを提案
-データに基づいた根拠も示してください。`,
-  },
-]
-
 const statusConfig: Record<
   ApiBroadcast['status'],
   { label: string; className: string }
@@ -68,6 +49,26 @@ type BroadcastTab = 'single' | 'dedup' | 'all'
 function BroadcastList() {
   const { t } = useI18n()
   const { selectedAccountId } = useAccount()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('配信メッセージを作成'),
+      prompt: t(`一斉配信用のメッセージを作成してください。
+1. 配信目的: [目的を指定]
+2. ターゲット: 全員 / タグ指定
+3. メッセージタイプ: テキスト / 画像 / Flex
+効果的なメッセージ文面を提案してください。`),
+    },
+    {
+      title: t('配信スケジュール最適化'),
+      prompt: t(`配信スケジュールを最適化してください。
+1. 過去の配信実績から最適な時間帯を分析
+2. 曜日別の開封率を確認
+3. 推奨スケジュールを提案
+データに基づいた根拠も示してください。`),
+    },
+  ]
   const [broadcasts, setBroadcasts] = useState<ApiBroadcast[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)

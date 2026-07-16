@@ -40,23 +40,23 @@ interface StepFormState {
   messageContent: string
 }
 
-function formatOffset(minutes: number): string {
+function formatOffset(minutes: number, t: (key: string) => string): string {
   const abs = Math.abs(minutes)
   const sign = minutes < 0 ? '' : '+'
-  if (abs === 0) return '基準時刻'
-  if (abs < 60) return `${sign}${minutes}分`
+  if (abs === 0) return t('基準時刻')
+  if (abs < 60) return `${sign}${minutes}${t('分')}`
   if (abs % 1440 === 0) {
     const days = abs / 1440
-    return minutes < 0 ? `${days}日前` : `${days}日後`
+    return minutes < 0 ? `${days}${t('日')}${t('前')}` : `${days}${t('日')}${t('後')}`
   }
   if (abs % 60 === 0) {
     const hours = abs / 60
-    return minutes < 0 ? `${hours}時間前` : `${hours}時間後`
+    return minutes < 0 ? `${hours}${t('時間')}${t('前')}` : `${hours}${t('時間')}${t('後')}`
   }
   const hours = Math.floor(abs / 60)
   const mins = abs % 60
   const prefix = minutes < 0 ? '-' : '+'
-  return `${prefix}${hours}時間${mins}分`
+  return `${prefix}${hours}${t('時間')}${mins}${t('分')}`
 }
 
 const messageTypeLabels: Record<string, string> = {
@@ -65,27 +65,28 @@ const messageTypeLabels: Record<string, string> = {
   flex: 'Flex',
 }
 
-const ccPrompts = [
-  {
-    title: 'リマインダー作成',
-    prompt: `新しいリマインダーの作成をサポートしてください。
+export default function RemindersPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('リマインダー作成'),
+      prompt: t(`新しいリマインダーの作成をサポートしてください。
 1. リマインダーの用途別テンプレート（セミナー、予約、フォローアップ）を提案
 2. 効果的なリマインダー名と説明文の書き方
 3. 有効化タイミングと対象者設定のベストプラクティス
-手順を示してください。`,
-  },
-  {
-    title: 'リマインダーステップ設計',
-    prompt: `リマインダーのステップ配信を設計してください。
+手順を示してください。`),
+    },
+    {
+      title: t('リマインダーステップ設計'),
+      prompt: t(`リマインダーのステップ配信を設計してください。
 1. オフセット時間の最適な設定（例: -24h, -1h, +30m）を提案
 2. 各ステップのメッセージ内容テンプレートを作成
 3. テキスト・画像・Flexメッセージの使い分けガイド
-手順を示してください。`,
-  },
-]
-
-export default function RemindersPage() {
-  const { t } = useI18n()
+手順を示してください。`),
+    },
+  ]
   const { selectedAccountId } = useAccount()
   const [reminders, setReminders] = useState<Reminder[]>([])
   const [loading, setLoading] = useState(true)
@@ -440,7 +441,7 @@ export default function RemindersPage() {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1">
                                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-                                        {formatOffset(step.offsetMinutes)}
+                                        {formatOffset(step.offsetMinutes, t)}
                                       </span>
                                       <span className="text-xs text-gray-400">
                                         {messageTypeLabels[step.messageType] ? t(messageTypeLabels[step.messageType]) : step.messageType}
@@ -476,7 +477,7 @@ export default function RemindersPage() {
                                   onChange={(e) => setStepForm({ ...stepForm, offsetMinutes: Number(e.target.value) })}
                                 />
                                 <p className="text-xs text-gray-400 mt-1">
-                                  {t('現在の値')}: {formatOffset(stepForm.offsetMinutes)}
+                                  {t('現在の値')}: {formatOffset(stepForm.offsetMinutes, t)}
                                 </p>
                               </div>
                               <div>

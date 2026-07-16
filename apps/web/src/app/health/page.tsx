@@ -49,27 +49,28 @@ const statusConfig: Record<AccountMigration['status'], { label: string; textColo
   failed: { label: '失敗', textColor: 'text-red-700', bgColor: 'bg-red-100' },
 }
 
-const ccPrompts = [
-  {
-    title: 'BAN リスク診断',
-    prompt: `各LINEアカウントのBANリスクを診断してください。
+export default function HealthPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('BAN リスク診断'),
+      prompt: t(`各LINEアカウントのBANリスクを診断してください。
 1. アカウントごとのエラーログとリスクレベルを確認
 2. エラーコード別の発生頻度と傾向を分析
 3. リスク軽減のための具体的なアクションプランを提案
-結果をレポートしてください。`,
-  },
-  {
-    title: 'アカウント移行手順',
-    prompt: `BANリスクの高いアカウントから友だちを移行する手順を説明してください。
+結果をレポートしてください。`),
+    },
+    {
+      title: t('アカウント移行手順'),
+      prompt: t(`BANリスクの高いアカウントから友だちを移行する手順を説明してください。
 1. 移行元・移行先アカウントの選定基準
 2. 友だちデータの移行プロセスと注意事項
 3. 移行後の動作確認とフォローアップ手順
-手順を示してください。`,
-  },
-]
-
-export default function HealthPage() {
-  const { t } = useI18n()
+手順を示してください。`),
+    },
+  ]
   const [accounts, setAccounts] = useState<LineAccount[]>([])
   const [healthLogs, setHealthLogs] = useState<Record<string, AccountHealthLog[]>>({})
   const [latestRisk, setLatestRisk] = useState<Record<string, AccountHealthLog['riskLevel']>>({})

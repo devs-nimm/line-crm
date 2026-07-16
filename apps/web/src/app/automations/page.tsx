@@ -75,28 +75,29 @@ const initialForm: CreateFormState = {
   priority: 0,
 }
 
-const ccPrompts = [
-  {
-    title: 'オートメーションルール作成',
-    prompt: `新しいオートメーションルールを作成するサポートをしてください。
-1. 利用可能なイベントタイプ（友だち追加、タグ変更、スコア閾値等）の説明
-2. アクション設定のJSON形式テンプレートを提供
-3. 条件設定と優先度の推奨値を提案
-手順を示してください。`,
-  },
-  {
-    title: 'オートメーション効果分析',
-    prompt: `現在のオートメーションルールの効果を分析してください。
-1. 各ルールの発火回数と成功率を確認
-2. イベントタイプ別の自動化カバレッジを評価
-3. 効果の低いルールの改善提案と新規ルールの推奨
-結果をレポートしてください。`,
-  },
-]
-
 export default function AutomationsPage() {
   const { selectedAccountId, loading: accountLoading } = useAccount()
   const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('オートメーションルール作成'),
+      prompt: t(`新しいオートメーションルールを作成するサポートをしてください。
+1. 利用可能なイベントタイプ（友だち追加、タグ変更、スコア閾値等）の説明
+2. アクション設定のJSON形式テンプレートを提供
+3. 条件設定と優先度の推奨値を提案
+手順を示してください。`),
+    },
+    {
+      title: t('オートメーション効果分析'),
+      prompt: t(`現在のオートメーションルールの効果を分析してください。
+1. 各ルールの発火回数と成功率を確認
+2. イベントタイプ別の自動化カバレッジを評価
+3. 効果の低いルールの改善提案と新規ルールの推奨
+結果をレポートしてください。`),
+    },
+  ]
   const [automations, setAutomations] = useState<Automation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')

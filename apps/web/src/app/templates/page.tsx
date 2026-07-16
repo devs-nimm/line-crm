@@ -59,19 +59,20 @@ function formatDate(iso: string): string {
   })
 }
 
-const ccPrompts = [
-  {
-    title: 'テンプレート作成',
-    prompt: `新しいメッセージテンプレートの作成をサポートしてください。
+export default function TemplatesPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('テンプレート作成'),
+      prompt: t(`新しいメッセージテンプレートの作成をサポートしてください。
 1. 用途別（挨拶、キャンペーン、通知、フォローアップ）のテンプレート文例を提案
 2. テキスト・Flexメッセージそれぞれの効果的な使い方
 3. カテゴリ分類と命名規則のベストプラクティス
-手順を示してください。`,
-  },
-]
-
-export default function TemplatesPage() {
-  const { t } = useI18n()
+手順を示してください。`),
+    },
+  ]
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
