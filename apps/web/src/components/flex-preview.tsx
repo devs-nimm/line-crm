@@ -1,5 +1,7 @@
 'use client'
 
+import { useI18n } from '@/lib/i18n'
+
 /**
  * Flex Message visual preview — renders LINE Flex JSON as a styled card.
  * Supports bubble (single) and carousel (multiple bubbles).
@@ -231,6 +233,7 @@ function FlexBubble({ bubble, maxWidth }: { bubble: FlexNode; maxWidth?: number 
 }
 
 export default function FlexPreview({ content, maxWidth }: { content: string; maxWidth?: number }) {
+  const { t } = useI18n()
   try {
     const parsed = JSON.parse(content)
 
@@ -251,6 +254,6 @@ export default function FlexPreview({ content, maxWidth }: { content: string; ma
     // Unknown type — fallback to text extraction
     return <pre className="text-xs bg-gray-50 rounded p-2 max-h-40 overflow-auto">{JSON.stringify(parsed, null, 2)}</pre>
   } catch {
-    return <p className="text-xs text-red-500">Flex JSON パースエラー</p>
+    return <p className="text-xs text-red-500">{t('Flex JSON パースエラー')}</p>
   }
 }

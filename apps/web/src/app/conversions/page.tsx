@@ -15,27 +15,28 @@ interface ConversionReportItem {
   totalValue: number
 }
 
-const ccPrompts = [
-  {
-    title: 'CV計測ポイント設定',
-    prompt: `コンバージョン計測ポイントの設定をサポートしてください。
+export default function ConversionsPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('CV計測ポイント設定'),
+      prompt: t(`コンバージョン計測ポイントの設定をサポートしてください。
 1. 主要なイベントタイプ（友だち追加、URLクリック、購入完了等）の説明
 2. 各CVポイントに設定すべき金額の目安を提案
 3. CVファネル全体の計測設計のベストプラクティス
-手順を示してください。`,
-  },
-  {
-    title: 'コンバージョン分析',
-    prompt: `現在のコンバージョンデータを分析してください。
+手順を示してください。`),
+    },
+    {
+      title: t('コンバージョン分析'),
+      prompt: t(`現在のコンバージョンデータを分析してください。
 1. CVポイント別の発火回数と金額を集計
 2. イベントタイプ別のCV率とトレンドを分析
 3. CV率向上のための改善施策を提案
-結果をレポートしてください。`,
-  },
-]
-
-export default function ConversionsPage() {
-  const { t } = useI18n()
+結果をレポートしてください。`),
+    },
+  ]
   const [points, setPoints] = useState<ConversionPoint[]>([])
   const [report, setReport] = useState<ConversionReportItem[]>([])
   const [loading, setLoading] = useState(true)

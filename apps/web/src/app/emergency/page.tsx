@@ -16,27 +16,28 @@ interface EmergencyAction {
   errorMessage?: string
 }
 
-const emergencyPrompts = [
-  {
-    title: '緊急: 全配信を停止するプロンプト',
-    prompt: `LINE CRM の全配信を即時停止してください。
+export default function EmergencyPage() {
+  const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const emergencyPrompts = [
+    {
+      title: t('緊急: 全配信を停止するプロンプト'),
+      prompt: t(`LINE CRM の全配信を即時停止してください。
 1. broadcasts の status が scheduled のものを全て draft に変更
 2. scenarios の isActive を全て false に変更
 3. automations の isActive を全て false に変更
-完了後、停止した件数を報告してください。`,
-  },
-  {
-    title: '緊急: アカウント移行プロンプト',
-    prompt: `LINE CRM のアカウント移行を実行してください。
+完了後、停止した件数を報告してください。`),
+    },
+    {
+      title: t('緊急: アカウント移行プロンプト'),
+      prompt: t(`LINE CRM のアカウント移行を実行してください。
 1. /health ページで現在のアカウント状態を確認
 2. BAN リスクが高いアカウントを特定
 3. 移行先アカウントを選択して移行を実行
-各ステップの結果を報告してください。`,
-  },
-]
-
-export default function EmergencyPage() {
-  const { t } = useI18n()
+各ステップの結果を報告してください。`),
+    },
+  ]
   const [actions, setActions] = useState<EmergencyAction[]>([
     {
       id: 'stop-broadcasts',

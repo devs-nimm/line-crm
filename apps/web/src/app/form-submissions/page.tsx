@@ -39,15 +39,15 @@ interface Submission {
 
 const PAGE_SIZE = 20
 
-function formatRelative(iso: string | null): string {
-  if (!iso) return '未回答'
+function formatRelative(iso: string | null, t: (key: string) => string): string {
+  if (!iso) return t('未回答')
   const d = new Date(iso)
   const now = Date.now()
   const diffMin = Math.floor((now - d.getTime()) / 60000)
-  if (diffMin < 1) return 'たった今'
-  if (diffMin < 60) return `${diffMin}分前`
-  if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}時間前`
-  if (diffMin < 60 * 24 * 7) return `${Math.floor(diffMin / (60 * 24))}日前`
+  if (diffMin < 1) return t('たった今')
+  if (diffMin < 60) return `${diffMin}${t('分前')}`
+  if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}${t('時間前')}`
+  if (diffMin < 60 * 24 * 7) return `${Math.floor(diffMin / (60 * 24))}${t('日前')}`
   return d.toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit' })
 }
 
@@ -183,7 +183,7 @@ export default function FormSubmissionsPage() {
                       {form.name}
                     </h3>
                     <span className="text-[11px] text-gray-400 whitespace-nowrap">
-                      {formatRelative(form.lastSubmittedAt)}
+                      {formatRelative(form.lastSubmittedAt, t)}
                     </span>
                   </div>
 

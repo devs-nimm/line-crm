@@ -7,25 +7,6 @@ import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
 import { useI18n } from '@/lib/i18n'
 
-const ccPrompts = [
-  {
-    title: 'ダッシュボードのKPI分析',
-    prompt: `LINE CRM ダッシュボードのデータを分析してください。
-1. 友だち数の推移を確認
-2. アクティブシナリオの効果を評価
-3. 配信の開封率・クリック率を分析
-改善提案を含めてレポートしてください。`,
-  },
-  {
-    title: '新しいシナリオを提案',
-    prompt: `現在の友だちデータとタグ情報を元に、効果的なシナリオ配信を提案してください。
-1. ターゲットセグメントの特定
-2. メッセージ内容の提案
-3. 配信タイミングの最適化
-具体的なステップ配信の構成を含めてください。`,
-  },
-]
-
 interface DashboardStats {
   friendCount: number | null
   activeScenarioCount: number | null
@@ -76,6 +57,26 @@ function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }
 export default function DashboardPage() {
   const { t } = useI18n()
   const { selectedAccountId, selectedAccount } = useAccount()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('ダッシュボードのKPI分析'),
+      prompt: t(`LINE CRM ダッシュボードのデータを分析してください。
+1. 友だち数の推移を確認
+2. アクティブシナリオの効果を評価
+3. 配信の開封率・クリック率を分析
+改善提案を含めてレポートしてください。`),
+    },
+    {
+      title: t('新しいシナリオを提案'),
+      prompt: t(`現在の友だちデータとタグ情報を元に、効果的なシナリオ配信を提案してください。
+1. ターゲットセグメントの特定
+2. メッセージ内容の提案
+3. 配信タイミングの最適化
+具体的なステップ配信の構成を含めてください。`),
+    },
+  ]
   const [stats, setStats] = useState<DashboardStats>({
     friendCount: null,
     activeScenarioCount: null,

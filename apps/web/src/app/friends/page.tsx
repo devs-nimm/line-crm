@@ -10,25 +10,6 @@ import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
 import { useI18n } from '@/lib/i18n'
 
-const ccPrompts = [
-  {
-    title: '友だちのセグメント分析',
-    prompt: `友だち一覧のデータを分析してください。
-1. タグ別の友だち数を集計
-2. アクティブ率の高いセグメントを特定
-3. エンゲージメントが低い層への施策を提案
-レポート形式で出力してください。`,
-  },
-  {
-    title: 'タグ一括管理',
-    prompt: `友だちのタグを一括管理してください。
-1. 未タグの友だちを特定
-2. 行動履歴に基づいたタグ付け提案
-3. 不要タグの整理
-作業手順を示してください。`,
-  },
-]
-
 const PAGE_SIZE = 20
 
 type SortMode = 'recent' | 'oldest'
@@ -37,6 +18,26 @@ type ResponseFilter = 'all' | 'unhandled'
 export default function FriendsPage() {
   const { selectedAccountId } = useAccount()
   const { t } = useI18n()
+
+  // Localized inside the component so the CC prompt titles/bodies go through t().
+  const ccPrompts = [
+    {
+      title: t('友だちのセグメント分析'),
+      prompt: t(`友だち一覧のデータを分析してください。
+1. タグ別の友だち数を集計
+2. アクティブ率の高いセグメントを特定
+3. エンゲージメントが低い層への施策を提案
+レポート形式で出力してください。`),
+    },
+    {
+      title: t('タグ一括管理'),
+      prompt: t(`友だちのタグを一括管理してください。
+1. 未タグの友だちを特定
+2. 行動履歴に基づいたタグ付け提案
+3. 不要タグの整理
+作業手順を示してください。`),
+    },
+  ]
   const [friends, setFriends] = useState<FriendListItem[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [total, setTotal] = useState(0)
