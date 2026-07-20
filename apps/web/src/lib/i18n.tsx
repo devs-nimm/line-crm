@@ -1556,7 +1556,6 @@ export const en: Record<string, string> = {
   "現在のオートメーションルールの効果を分析してください。\n1. 各ルールの発火回数と成功率を確認\n2. イベントタイプ別の自動化カバレッジを評価\n3. 効果の低いルールの改善提案と新規ルールの推奨\n結果をレポートしてください。": "Please analyze the effectiveness of the current automation rules.\n1. Check the trigger count and success rate of each rule\n2. Evaluate automation coverage by event type\n3. Suggest improvements for low-performing rules and recommend new rules\nPlease report the results.",
 
   // --- Remaining gaps found in an admin-page translation-coverage audit ---
-  "日時未設定": "Date/time not set",
   "/通 換算": " per message",
   "他": "+",
   "項目": "more fields",
