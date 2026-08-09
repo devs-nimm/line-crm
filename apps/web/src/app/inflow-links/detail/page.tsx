@@ -15,7 +15,7 @@ export default function InflowLinkDetailPage() {
   const [route, setRoute] = useState<EntryRoute | null>(null)
   const [funnel, setFunnel] = useState<EntryRouteFunnel | null>(null)
   const [loading, setLoading] = useState(!!id)
-  const [error, setError] = useState(id ? '' : 'id クエリパラメータが必要です')
+  const [error, setError] = useState(id ? '' : t('id クエリパラメータが必要です'))
 
   useEffect(() => {
     if (!id) return
@@ -23,7 +23,7 @@ export default function InflowLinkDetailPage() {
       setLoading(true)
       const [r, f] = await Promise.all([api.entryRoutes.get(id), api.entryRoutes.funnel(id)])
       if (r.success) setRoute(r.data)
-      else setError('リンクの取得に失敗しました')
+      else setError(t('リンクの取得に失敗しました'))
       if (f.success) setFunnel(f.data)
       setLoading(false)
     })()
