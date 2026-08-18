@@ -1097,7 +1097,7 @@ export default function ChatsPage() {
                         <div className="flex-1 border-t border-white/40" />
                         <span className="text-[11px] text-white/90 bg-black/30 px-2.5 py-0.5 rounded-full">
                           📁 {t(archiveReasonLabels[b.archiveReason ?? ''] ?? 'アーカイブ済み')}
-                          {' ・ '}
+                          {t(' ・ ')}
                           {new Date(b.archivedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
                         <div className="flex-1 border-t border-white/40" />
@@ -1242,7 +1242,7 @@ export default function ChatsPage() {
                     {latestArchivedSession && (
                       <>
                         {t(archiveReasonLabels[latestArchivedSession.archiveReason ?? ''] ?? 'アーカイブ済み')}
-                        {' ・ '}
+                        {t(' ・ ')}
                         {new Date(latestArchivedSession.archivedAt).toLocaleString('ja-JP')}
                         <br />
                       </>

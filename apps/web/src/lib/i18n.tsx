@@ -1349,6 +1349,7 @@ export const en: Record<string, string> = {
   "オペレーターによりアーカイブ": 'Archived by operator',
   "30分無応答のため自動アーカイブ": 'Auto-archived after 30 minutes of inactivity',
   "ユーザー操作 (/new) によりアーカイブ": 'Archived by user action (/new)',
+  " ・ ": ' · ',
   "この会話をアーカイブしますか？": 'Archive this conversation?',
   "・会話は読み取り専用になり、メッセージ履歴は管理画面に残ります": '· The conversation becomes read-only; message history stays in the admin panel',
   "・AIは次のメッセージから新しい会話として応答します": '· The AI will respond to the next message as a new conversation',
