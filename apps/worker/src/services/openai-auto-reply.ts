@@ -54,6 +54,37 @@ type ResponsesApiResponse = {
   output?: ResponsesOutputItem[];
 };
 
+// Coerce a function_call `arguments` value to a plain object. Some builds send
+// it as a JSON string, others (the tool_call wrapper's inner call) send it as
+// an already-parsed object. Never trust the shape — return null on anything else.
+function coerceArgs(raw: unknown): Record<string, unknown> | null {
+  let val = raw;
+  if (typeof val === 'string') {
+    try {
+      val = JSON.parse(val);
+    } catch {
+      return null;
+    }
+  }
+  return typeof val === 'object' && val !== null ? (val as Record<string, unknown>) : null;
+}
+
+// Some Hermes builds dispatch every plugin tool through a generic wrapper:
+//   { type:'function_call', name:'tool_call', arguments:'{"name":"ask_user_line","arguments":{...}}' }
+// where the inner `arguments` is an OBJECT, not a string. Others emit the tool
+// natively: { type:'function_call', name:'ask_user_line', arguments:'{...}' }.
+// resolveToolCall normalizes BOTH to { name, args } (args: object or string).
+const TOOL_DISPATCH_WRAPPERS = new Set(['tool_call', 'call_tool', 'invoke_tool']);
+function resolveToolCall(item: ResponsesOutputItem | undefined): { name: string; args: unknown } | null {
+  if (item?.type !== 'function_call' || typeof item.name !== 'string') return null;
+  if (TOOL_DISPATCH_WRAPPERS.has(item.name)) {
+    const inner = coerceArgs(item.arguments);
+    if (!inner || typeof inner.name !== 'string') return null;
+    return { name: inner.name, args: inner.arguments };
+  }
+  return { name: item.name, args: item.arguments };
+}
+
 function buildResponsesUrl(baseUrl: string): string {
   return new URL('responses', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`).toString();
 }
@@ -95,15 +126,9 @@ export type AskUserLine = {
 // boundary — the plugin validates what the model produced, but we clamp
 // everything again server-side (never trust model output).
 function parseAsk(rawArguments: unknown): AskUserLine | null {
-  if (typeof rawArguments !== 'string') return null;
-  let args: unknown;
-  try {
-    args = JSON.parse(rawArguments);
-  } catch {
-    return null;
-  }
-  if (typeof args !== 'object' || args === null) return null;
-  const { message, kind, options } = args as Record<string, unknown>;
+  const args = coerceArgs(rawArguments);
+  if (!args) return null;
+  const { message, kind, options } = args;
   if (typeof message !== 'string' || message.trim() === '') return null;
   if (kind !== 'choice' && kind !== 'confirm' && kind !== 'freetext') return null;
 
@@ -133,9 +158,9 @@ function extractAskUserLine(payload: ResponsesApiResponse): AskUserLine | null {
   // hold several ask_user_line calls. The last valid one is the question the
   // model settled on; earlier rejected attempts must not shadow it.
   for (let i = payload.output.length - 1; i >= 0; i--) {
-    const item = payload.output[i];
-    if (item?.type !== 'function_call' || item.name !== 'ask_user_line') continue;
-    const ask = parseAsk(item.arguments);
+    const call = resolveToolCall(payload.output[i]);
+    if (!call || call.name !== 'ask_user_line') continue;
+    const ask = parseAsk(call.args);
     if (ask) return ask;
   }
   return null;
@@ -144,15 +169,9 @@ function extractAskUserLine(payload: ResponsesApiResponse): AskUserLine | null {
 // Parse + re-validate one send_line_flex arguments string (same trust boundary
 // as parseAsk — the plugin validates, we clamp again server-side).
 function parseFlex(rawArguments: unknown): FlexMessage | null {
-  if (typeof rawArguments !== 'string') return null;
-  let args: unknown;
-  try {
-    args = JSON.parse(rawArguments);
-  } catch {
-    return null;
-  }
-  if (typeof args !== 'object' || args === null) return null;
-  const { alt_text: altRaw, contents } = args as Record<string, unknown>;
+  const args = coerceArgs(rawArguments);
+  if (!args) return null;
+  const { alt_text: altRaw, contents } = args;
   if (typeof contents !== 'object' || contents === null) return null;
 
   const container = contents as { type?: unknown; contents?: unknown };
@@ -178,8 +197,9 @@ function extractFlexMessages(payload: ResponsesApiResponse): FlexMessage[] {
   if (!Array.isArray(payload.output)) return [];
   const flex: FlexMessage[] = [];
   for (const item of payload.output) {
-    if (item?.type !== 'function_call' || item.name !== 'send_line_flex') continue;
-    const parsed = parseFlex(item.arguments);
+    const call = resolveToolCall(item);
+    if (!call || call.name !== 'send_line_flex') continue;
+    const parsed = parseFlex(call.args);
     if (parsed) flex.push(parsed);
   }
   return flex;
@@ -202,6 +222,10 @@ export async function generateOpenAIReply(
   const response = await fetch(buildResponsesUrl(settings.baseUrl), {
     method: 'POST',
     headers,
+    // Don't follow redirects: an auth-gated gateway 302s to /login (an HTML
+    // page), which fetch would otherwise follow to a 200 and we'd mistake for
+    // success. Surface it as a hard failure instead of a silent JSON-parse null.
+    redirect: 'manual',
     body: JSON.stringify({
       model: settings.model,
       input: incomingText.slice(0, MAX_INPUT_CHARS),
@@ -210,10 +234,19 @@ export async function generateOpenAIReply(
     }),
   });
 
-  if (!response.ok) {
+  const contentType = response.headers.get('content-type') ?? '';
+  // status 0 = an opaqueredirect (redirect:'manual' caught a 3xx). Treat any
+  // redirect or non-JSON body as an upstream/auth failure, loudly.
+  if (!response.ok || response.status === 0 || !contentType.includes('application/json')) {
     console.error('[openai-auto-reply] upstream request failed', {
       status: response.status,
       statusText: response.statusText,
+      contentType,
+      location: response.headers.get('location'),
+      hint:
+        response.status === 0 || (response.status >= 300 && response.status < 400)
+          ? 'gateway redirected (likely auth) — check OPENAI_BASE_URL / OPENAI_API_KEY'
+          : undefined,
     });
     return null;
   }
@@ -230,7 +263,23 @@ export async function generateOpenAIReply(
   const text = extractOutputText(payload);
   const ask = extractAskUserLine(payload);
   const flex = extractFlexMessages(payload);
-  if (!text && !ask && flex.length === 0) return null;
+  if (!text && !ask && flex.length === 0) {
+    // Reached the model but produced nothing renderable — log the output shape
+    // so a function_call the parser didn't recognize (wrong item `type`, or
+    // `arguments` delivered as an object not a JSON string) is visible instead
+    // of a silent no-reply. Types + names + arguments typeof only, not content.
+    console.error('[openai-auto-reply] empty render from upstream', {
+      hasOutputText: typeof payload.output_text === 'string',
+      items: Array.isArray(payload.output)
+        ? payload.output.map((it) => ({
+            type: it?.type,
+            name: it?.name,
+            argsType: typeof it?.arguments,
+          }))
+        : null,
+    });
+    return null;
+  }
   return {
     text: text ? text.slice(0, MAX_OUTPUT_CHARS) : null,
     ask,
