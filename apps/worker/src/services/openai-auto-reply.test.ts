@@ -145,6 +145,14 @@ function baseArgs(db: D1Database, overrides: Partial<Parameters<typeof maybeSend
   };
 }
 
+/** Gateway 404 for a previous_response_id whose session was reaped server-side. */
+function responseNotFound(id = 'resp_dead') {
+  return new Response(
+    JSON.stringify({ error: { message: `Response not found: ${id}`, type: 'invalid_request_error' } }),
+    { status: 404, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
 describe('generateOpenAIReply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -169,6 +177,7 @@ describe('generateOpenAIReply', () => {
       ask: null,
       flex: [],
       responseId: 'resp_abc',
+      sessionReset: false,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://api.openai.com/v1/responses',
@@ -212,6 +221,7 @@ describe('generateOpenAIReply', () => {
       ask: null,
       flex: [],
       responseId: 'resp_1',
+      sessionReset: false,
     });
   });
 
@@ -262,6 +272,7 @@ describe('generateOpenAIReply', () => {
       ask: { message: 'Do you want a discount?', kind: 'confirm' },
       flex: [],
       responseId: 'resp_w',
+      sessionReset: false,
     });
   });
 
@@ -291,6 +302,7 @@ describe('generateOpenAIReply', () => {
       ask: { message: 'Which branch?', kind: 'choice', options: ['main', 'develop'] },
       flex: [],
       responseId: 'resp_q',
+      sessionReset: false,
     });
   });
 
@@ -343,6 +355,7 @@ describe('generateOpenAIReply', () => {
       ask: null,
       flex: [],
       responseId: 'resp_ask',
+      sessionReset: false,
     });
   });
 
@@ -378,6 +391,66 @@ describe('generateOpenAIReply', () => {
 
     await expect(generateOpenAIReply(SETTINGS, 'hi', null)).resolves.toBeNull();
     await expect(generateOpenAIReply(SETTINGS, 'hi', null)).resolves.toBeNull();
+  });
+
+  // #50: the gateway can reap the session behind previous_response_id. Without
+  // a retry the friend is stuck: every later turn resends the dead id and gets
+  // no reply.
+  test('retries once without previous_response_id when the gateway rejects it as not found', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(responseNotFound('resp_dead'))
+      .mockResolvedValueOnce(responsesPayload('fresh start', 'resp_fresh'));
+
+    await expect(generateOpenAIReply(SETTINGS, 'hello', 'resp_dead')).resolves.toEqual({
+      text: 'fresh start',
+      ask: null,
+      flex: [],
+      responseId: 'resp_fresh',
+      sessionReset: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string).previous_response_id).toBe('resp_dead');
+    expect(JSON.parse(fetchSpy.mock.calls[1][1]!.body as string)).not.toHaveProperty('previous_response_id');
+  });
+
+  test('does not retry a 404 that is not about the previous response id', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'The model `gpt-x` does not exist', type: 'invalid_request_error' } }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(generateOpenAIReply(SETTINGS, 'hello', 'resp_prev')).resolves.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not retry auth or 5xx failures', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'Response not found: whatever' } }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(generateOpenAIReply(SETTINGS, 'hello', 'resp_prev')).resolves.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not retry when there was no previous_response_id to blame', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(responseNotFound());
+
+    await expect(generateOpenAIReply(SETTINGS, 'hello', null)).resolves.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns null when the fresh retry also fails', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(responseNotFound())
+      .mockResolvedValueOnce(new Response('gateway down', { status: 502 }));
+
+    await expect(generateOpenAIReply(SETTINGS, 'hello', 'resp_dead')).resolves.toBeNull();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -439,6 +512,29 @@ describe('maybeSendOpenAIAutoReply', () => {
     const sessionUpsert = runs.find((r) => r.sql.includes('ai_chat_sessions'));
     expect(sessionUpsert?.params[2]).toBe('resp_6');
     expect(sessionUpsert?.params[3]).toBe(6);
+  });
+
+  // #50 regression: stale previous_response_id → one reply is still delivered
+  // and the session row restarts at turn 1 with the new id.
+  test('a rejected previous_response_id still delivers a reply and resets the session row', async () => {
+    openAISettingsMocks.getEffectiveOpenAISettings.mockResolvedValue(SETTINGS);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(responseNotFound('resp_dead'))
+      .mockResolvedValueOnce(responsesPayload('AI reply', 'resp_new'));
+    const { db, runs } = makeDb({ last_response_id: 'resp_dead', turn_count: 4 });
+    const args = baseArgs(db);
+
+    await expect(maybeSendOpenAIAutoReply(args)).resolves.toEqual({
+      matched: true,
+      replyTokenConsumed: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(args.lineClient.replyMessage).toHaveBeenCalledTimes(1);
+    expect(args.lineClient.replyMessage).toHaveBeenCalledWith('reply-token', [{ type: 'text', text: 'AI reply' }]);
+
+    const sessionUpsert = runs.find((r) => r.sql.includes('ai_chat_sessions'));
+    expect(sessionUpsert?.params[2]).toBe('resp_new');
+    expect(sessionUpsert?.params[3]).toBe(1);
   });
 
   test('session at max turns starts fresh: previous_response_id omitted, turn_count resets to 1', async () => {

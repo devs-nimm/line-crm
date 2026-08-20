@@ -216,6 +216,14 @@ CREATE TABLE chat_sessions (
 
 回帰テスト: `openai-auto-reply.test.ts` (バッチ3ターンの `input` と連鎖する `previous_response_id`)、`webhook.test.ts` (multi-event webhook から渡る `incomingText`)。
 
+### 失効した previous_response_id からの復帰 (#50)
+
+ゲートウェイ側でセッションが回収される (`ws_orphan_reap` など) と、保存済みの `previous_response_id` は無効になり、`/responses` は HTTP 404 + `{"error":{"message":"Response not found: <id>"}}` を返す。この場合 backend は **`previous_response_id` を外して1回だけ再送**し、返信を届ける。`ai_chat_sessions` は新しい response id で `turn_count=1` に振り直される (新しいゲートウェイセッションのため)。
+
+判定はこの 404 + エラーメッセージの形にのみ一致させる — 認証エラーや 5xx では再送もセッション破棄も行わない。
+
+回帰テスト: `openai-auto-reply.test.ts` (404 → 再送成功で1返信 + セッション行リセット、非該当エラーでは再送なし)。
+
 ### システムノート
 
 アーカイブ時 (ノート1、トリガーごとに文言が異なる) と新セッションの最初のメッセージ時 (ノート2「新しい会話を開始しました。以前の会話内容は引き継がれません。」) に、bot からテキストメッセージが送られる。これらは `messages_log` に `source='system_note'` で記録され、**LLM への入力には一切含まれない**。管理画面のチャット詳細では中央寄せのシステム区切りとして表示され、アーカイブ済みセッションのメッセージは薄い表示 + アーカイブ理由・日時付きの区切り線で示される。
