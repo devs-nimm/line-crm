@@ -102,6 +102,7 @@ function messageAction(label: string) {
  */
 function makeDb(sessionRow: { last_response_id: string; turn_count: number } | null = null) {
   const runs: Array<{ sql: string; params: unknown[] }> = [];
+  let session = sessionRow;
   const db = {
     prepare: vi.fn((sql: string) => {
       let bound: unknown[] = [];
@@ -110,9 +111,13 @@ function makeDb(sessionRow: { last_response_id: string; turn_count: number } | n
           bound = params;
           return stmt;
         },
-        first: vi.fn(async () => (sql.trimStart().startsWith('SELECT') ? sessionRow : null)),
+        first: vi.fn(async () => (sql.trimStart().startsWith('SELECT') ? session : null)),
         run: vi.fn(async () => {
           runs.push({ sql, params: bound });
+          // Multi-turn tests need the next SELECT to see this turn's chaining.
+          if (sql.includes('ai_chat_sessions')) {
+            session = { last_response_id: bound[2] as string, turn_count: bound[3] as number };
+          }
           return {};
         }),
       };
@@ -120,6 +125,24 @@ function makeDb(sessionRow: { last_response_id: string; turn_count: number } | n
     }),
   } as unknown as D1Database;
   return { db, runs };
+}
+
+function baseArgs(db: D1Database, overrides: Partial<Parameters<typeof maybeSendOpenAIAutoReply>[0]> = {}) {
+  return {
+    db,
+    env: {},
+    lineClient: {
+      replyMessage: vi.fn().mockResolvedValue(undefined),
+      pushMessage: vi.fn().mockResolvedValue(undefined),
+    },
+    friendId: 'friend-1',
+    lineUserId: 'U1',
+    incomingText: 'hello',
+    replyToken: 'reply-token',
+    lineAccountId: 'acc-1',
+    createdAt: '2026-07-10T00:00:00.000+09:00',
+    ...overrides,
+  };
 }
 
 describe('generateOpenAIReply', () => {
@@ -362,24 +385,6 @@ describe('maybeSendOpenAIAutoReply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
-
-  function baseArgs(db: D1Database, overrides: Partial<Parameters<typeof maybeSendOpenAIAutoReply>[0]> = {}) {
-    return {
-      db,
-      env: {},
-      lineClient: {
-        replyMessage: vi.fn().mockResolvedValue(undefined),
-        pushMessage: vi.fn().mockResolvedValue(undefined),
-      },
-      friendId: 'friend-1',
-      lineUserId: 'U1',
-      incomingText: 'hello',
-      replyToken: 'reply-token',
-      lineAccountId: 'acc-1',
-      createdAt: '2026-07-10T00:00:00.000+09:00',
-      ...overrides,
-    };
-  }
 
   test('returns unmatched when OpenAI settings are missing', async () => {
     openAISettingsMocks.getEffectiveOpenAISettings.mockResolvedValue({
@@ -833,5 +838,59 @@ describe('maybeSendOpenAIAutoReply', () => {
       'template',
     ]);
     expect(messages[3].template.type).toBe('confirm');
+  });
+});
+
+// #48: the gateway keeps conversation state server-side, so each turn must post
+// ONLY the newest LINE message as `input` and chain via previous_response_id.
+// A batched webhook (several message events in one delivery) is the case where
+// an accumulating buffer would show up as `\n\n`-joined prior text.
+describe('input carries only the newest message (#48)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  test('a batched multi-event webhook posts one un-joined input per message', async () => {
+    openAISettingsMocks.getEffectiveOpenAISettings.mockResolvedValue(SETTINGS);
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(responsesPayload('ack 1', 'resp_1'))
+      .mockResolvedValueOnce(responsesPayload('ack 2', 'resp_2'))
+      .mockResolvedValueOnce(responsesPayload('ack 3', 'resp_3'));
+    const { db } = makeDb(null);
+
+    // The webhook handler walks body.events sequentially; each text event is
+    // its own auto-reply turn.
+    const texts = ['AI or automation', "Hi how's it going", "Hi how's it going"];
+    for (const incomingText of texts) {
+      await maybeSendOpenAIAutoReply(baseArgs(db, { incomingText }));
+    }
+
+    const inputs = fetchSpy.mock.calls.map(
+      (call) => JSON.parse(call[1]!.body as string).input as string,
+    );
+    expect(inputs).toEqual(texts);
+    for (const input of inputs) expect(input).not.toContain('\n');
+
+    // State lives upstream: turns 2 and 3 chain instead of resending history.
+    const prevIds = fetchSpy.mock.calls.map(
+      (call) => JSON.parse(call[1]!.body as string).previous_response_id,
+    );
+    expect(prevIds).toEqual([undefined, 'resp_1', 'resp_2']);
+  });
+
+  test('the request body carries no field other than model/input/store/previous_response_id', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(responsesPayload('ok', 'resp_x'));
+
+    await generateOpenAIReply(SETTINGS, 'tapped label', 'resp_prev');
+
+    expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({
+      model: 'gpt-4o-mini',
+      input: 'tapped label',
+      store: true,
+      previous_response_id: 'resp_prev',
+    });
   });
 });

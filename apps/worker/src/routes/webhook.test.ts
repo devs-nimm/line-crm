@@ -46,6 +46,14 @@ vi.mock('../services/step-delivery.js', () => ({
   expandVariables: vi.fn(),
 }));
 
+const autoReplyMocks = vi.hoisted(() => ({
+  maybeSendOpenAIAutoReply: vi.fn(),
+}));
+
+vi.mock('../services/openai-auto-reply.js', () => ({
+  maybeSendOpenAIAutoReply: autoReplyMocks.maybeSendOpenAIAutoReply,
+}));
+
 import { verifySignature } from '@line-crm/line-sdk';
 import {
   addTagToFriend,
@@ -89,6 +97,10 @@ const baseExecutionCtx = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getLineAccounts).mockResolvedValue([]);
+  autoReplyMocks.maybeSendOpenAIAutoReply.mockResolvedValue({
+    matched: false,
+    replyTokenConsumed: false,
+  });
 });
 
 describe('POST /webhook — DoS defenses (#104)', () => {
@@ -295,5 +307,88 @@ describe('POST /webhook — first-contact existing friends', () => {
     expect(addTagToFriend).not.toHaveBeenCalled();
     expect(getEntryRouteByRefCode).not.toHaveBeenCalled();
     expect(getMessageTemplateById).not.toHaveBeenCalled();
+  });
+});
+
+// #48: the AI gateway keeps conversation state server-side, so every turn must
+// carry ONLY the newest LINE message. A batched delivery (LINE packs several
+// message events into one webhook body) is where an accumulating buffer would
+// surface as joined prior text.
+describe('POST /webhook — AI auto-reply input (#48)', () => {
+  test('a batched multi-event body sends each message as its own un-joined input', async () => {
+    vi.mocked(verifySignature).mockResolvedValue(true);
+    vi.mocked(jstNow).mockReturnValue('2026-06-18T12:00:00.000+09:00');
+    vi.mocked(getFriendByLineUserId).mockResolvedValue({
+      id: 'friend-1',
+      line_user_id: 'U-existing',
+      display_name: 'Existing Friend',
+      picture_url: null,
+      status_message: null,
+      is_following: 1,
+      user_id: null,
+      line_account_id: null,
+      metadata: '{}',
+      first_tracked_link_id: null,
+      created_at: '2026-06-18T12:00:00.000+09:00',
+      updated_at: '2026-06-18T12:00:00.000+09:00',
+    });
+    autoReplyMocks.maybeSendOpenAIAutoReply.mockResolvedValue({
+      matched: true,
+      replyTokenConsumed: true,
+    });
+
+    const stmt = {
+      bind: vi.fn(),
+      run: vi.fn().mockResolvedValue({}),
+      first: vi.fn().mockResolvedValue(null),
+      all: vi.fn().mockResolvedValue({ results: [] }),
+    };
+    stmt.bind.mockReturnValue(stmt);
+    const db = { prepare: vi.fn().mockReturnValue(stmt) } as unknown as D1Database;
+
+    const executionCtx = {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+      props: {},
+    } as unknown as ExecutionContext;
+
+    // The tapped quick-reply label followed by two typed messages — the exact
+    // shape that showed up concatenated in the gateway request.
+    const texts = ['AI or automation', 'Hi how\u2019s it going', 'Hi how\u2019s it going'];
+    const app = setupApp();
+    const res = await app.request(
+      '/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Line-Signature': 'A'.repeat(43) + '=',
+        },
+        body: JSON.stringify({
+          destination: 'bot',
+          events: texts.map((text, i) => ({
+            type: 'message',
+            replyToken: `reply-token-${i}`,
+            message: { type: 'text', id: `message-${i}`, text },
+            timestamp: Date.now(),
+            source: { type: 'user', userId: 'U-existing' },
+            webhookEventId: `event-${i}`,
+            deliveryContext: { isRedelivery: false },
+            mode: 'active',
+          })),
+        }),
+      },
+      { ...baseEnv, DB: db },
+      executionCtx,
+    );
+
+    expect(res.status).toBe(200);
+    await (vi.mocked(executionCtx.waitUntil).mock.calls[0]?.[0] as Promise<unknown>);
+
+    const inputs = autoReplyMocks.maybeSendOpenAIAutoReply.mock.calls.map(
+      (call) => (call[0] as { incomingText: string }).incomingText,
+    );
+    expect(inputs).toEqual(texts);
+    for (const input of inputs) expect(input).not.toContain('\n');
   });
 });
