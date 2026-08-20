@@ -35,6 +35,15 @@ const valid = await verifySignature(channelSecret, rawBody, signature);
 | `unfollow` | `friends.is_following` を `false` に更新 |
 | `message` (text) | メッセージログ記録、チャット作成/更新、自動応答チェック、イベントバス発火 |
 
+### 再配信ガード (#49)
+
+LINEはACKが遅い/失敗した場合に同じWebhookを再配信する。ガードがないと同一イベントでAIの応答処理が再実行され、`replyMessage` / `pushMessage` が重複送信される。
+
+- **`webhookEventId` のクレーム**: イベント処理の前に `webhook_event_claims` テーブルへINSERT（`ON CONFLICT DO NOTHING`）。既にクレーム済みのIDはスキップし、各イベントを高々1回だけ処理する。行は6時間cronでTTL（24時間）超過分を削除。
+- **`deliveryContext.isRedelivery`**: クレーム行が消えている（purge済み / INSERT失敗）再配信でも、メッセージログとチャット状態の更新は行うが、自動応答（キーワード応答・AI応答の両方）は実行しない。
+
+DB障害でクレームINSERTが失敗した場合はフェイルオープン（処理を続行）する。実メッセージを落とすほうが重複より損害が大きいため。同じ理由で、イベント処理が例外で失敗した場合はクレーム行を削除し、LINEの再配信で再試行できるようにする。
+
 ### 即時配信の仕組み
 
 友だち追加時、`delay_minutes = 0` の最初のステップは即座にpushMessageで送信される（cronの5分待ちを回避）。2番目以降のステップはcronスケジュールに委ねられる。

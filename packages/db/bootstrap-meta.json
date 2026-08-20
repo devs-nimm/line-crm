@@ -58,7 +58,8 @@
     "049_tracked_links_short_code.sql",
     "050_ai_chat_sessions.sql",
     "051_chat_sessions.sql",
-    "052_chat_sessions_archived_by.sql"
+    "052_chat_sessions_archived_by.sql",
+    "053_webhook_event_claims.sql"
   ],
-  "migrationCount": 59
+  "migrationCount": 60
 }

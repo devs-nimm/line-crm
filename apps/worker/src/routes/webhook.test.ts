@@ -42,8 +42,10 @@ vi.mock('../services/event-bus.js', () => ({
 }));
 
 vi.mock('../services/step-delivery.js', () => ({
-  buildMessage: vi.fn(),
-  expandVariables: vi.fn(),
+  buildMessage: vi.fn((type: string, content: string) => ({ type, text: content })),
+  expandVariables: vi.fn((content: string) => content),
+  resolveMetadata: vi.fn().mockResolvedValue({}),
+  messageToLogPayload: vi.fn(() => ({ messageType: 'text', content: 'reply' })),
 }));
 
 const autoReplyMocks = vi.hoisted(() => ({
@@ -390,5 +392,207 @@ describe('POST /webhook — AI auto-reply input (#48)', () => {
     );
     expect(inputs).toEqual(texts);
     for (const input of inputs) expect(input).not.toContain('\n');
+  });
+});
+
+// #49: LINE redelivers a webhook when our ACK is slow or fails. Both guards
+// below exist so a redelivery can never run the AI turn — and the send — twice.
+describe('POST /webhook — redelivery guards (#49)', () => {
+  // Stands in for the webhook_event_claims table: the first INSERT for an id
+  // reports changes=1, repeats report changes=0 (ON CONFLICT DO NOTHING).
+  function claimTrackingDb() {
+    const claimed = new Set<string>();
+    const db = {
+      prepare: (sql: string) => {
+        let args: unknown[] = [];
+        const stmt = {
+          bind: (...bound: unknown[]) => {
+            args = bound;
+            return stmt;
+          },
+          run: async () => {
+            if (!sql.includes('webhook_event_claims')) return {};
+            const id = args[0] as string;
+            if (sql.startsWith('DELETE')) {
+              claimed.delete(id);
+              return { meta: { changes: 1 } };
+            }
+            const isNew = !claimed.has(id);
+            claimed.add(id);
+            return { meta: { changes: isNew ? 1 : 0 } };
+          },
+          first: async () => null,
+          all: async () => ({ results: [] }),
+        };
+        return stmt;
+      },
+    } as unknown as D1Database;
+    return db;
+  }
+
+  // Same claim tracking, but the auto_replies SELECT returns one exact-match rule
+  // so the keyword reply path actually calls lineClient.replyMessage.
+  function claimTrackingDbWithAutoReply() {
+    const base = claimTrackingDb();
+    const originalPrepare = base.prepare.bind(base);
+    return {
+      prepare: (sql: string) => {
+        const stmt = originalPrepare(sql) as unknown as {
+          bind: (...a: unknown[]) => unknown;
+          all: () => Promise<{ results: unknown[] }>;
+        };
+        if (sql.includes('FROM auto_replies')) {
+          stmt.all = async () => ({
+            results: [
+              {
+                id: 'rule-1',
+                keyword: '\u3053\u3093\u306b\u3061\u306f',
+                match_type: 'exact',
+                response_type: 'text',
+                response_content: '\u3069\u3046\u3082',
+                template_id: null,
+                is_active: 1,
+                created_at: '2026-06-18T12:00:00.000+09:00',
+              },
+            ],
+          });
+        }
+        return stmt;
+      },
+    } as unknown as D1Database;
+  }
+
+  function messageBody(overrides: Record<string, unknown>) {
+    return JSON.stringify({
+      destination: 'bot',
+      events: [
+        {
+          type: 'message',
+          replyToken: 'reply-token',
+          message: { type: 'text', id: 'message-1', text: 'こんにちは' },
+          timestamp: 1750000000000,
+          source: { type: 'user', userId: 'U-existing' },
+          webhookEventId: 'event-dup',
+          deliveryContext: { isRedelivery: false },
+          mode: 'active',
+          ...overrides,
+        },
+      ],
+    });
+  }
+
+  async function post(app: ReturnType<typeof setupApp>, db: D1Database, body: string) {
+    const executionCtx = {
+      waitUntil: vi.fn(),
+      passThroughOnException: vi.fn(),
+      props: {},
+    } as unknown as ExecutionContext;
+    const res = await app.request(
+      '/webhook',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Line-Signature': 'A'.repeat(43) + '=',
+        },
+        body,
+      },
+      { ...baseEnv, DB: db },
+      executionCtx,
+    );
+    await (vi.mocked(executionCtx.waitUntil).mock.calls[0]?.[0] as Promise<unknown> | undefined);
+    return res;
+  }
+
+  beforeEach(() => {
+    vi.mocked(verifySignature).mockResolvedValue(true);
+    vi.mocked(jstNow).mockReturnValue('2026-06-18T12:00:00.000+09:00');
+    vi.mocked(getFriendByLineUserId).mockResolvedValue({
+      id: 'friend-1',
+      line_user_id: 'U-existing',
+      display_name: 'Existing Friend',
+      picture_url: null,
+      status_message: null,
+      is_following: 1,
+      user_id: null,
+      line_account_id: null,
+      metadata: '{}',
+      first_tracked_link_id: null,
+      created_at: '2026-06-18T12:00:00.000+09:00',
+      updated_at: '2026-06-18T12:00:00.000+09:00',
+    });
+    autoReplyMocks.maybeSendOpenAIAutoReply.mockResolvedValue({
+      matched: true,
+      replyTokenConsumed: true,
+    });
+  });
+
+  test('the same webhookEventId delivered twice triggers exactly one AI reply', async () => {
+    const db = claimTrackingDb();
+    const app = setupApp();
+
+    const first = await post(app, db, messageBody({}));
+    const second = await post(app, db, messageBody({}));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(autoReplyMocks.maybeSendOpenAIAutoReply).toHaveBeenCalledTimes(1);
+    // The duplicate must not re-run the rest of the handler either.
+    expect(fireEvent).toHaveBeenCalledTimes(1);
+  });
+
+  test('a keyword auto-reply is not re-sent for a redelivered event', async () => {
+    // The keyword path calls lineClient.replyMessage directly, so this asserts
+    // the real send rather than the module-mocked AI helper.
+    const db = claimTrackingDbWithAutoReply();
+    const app = setupApp();
+
+    await post(app, db, messageBody({ webhookEventId: 'event-keyword-fresh' }));
+    expect(lineClientMocks.replyMessage).toHaveBeenCalledTimes(1);
+
+    await post(
+      app,
+      db,
+      messageBody({ webhookEventId: 'event-keyword-redelivered', deliveryContext: { isRedelivery: true } }),
+    );
+    expect(lineClientMocks.replyMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test('a handler failure releases the claim so the redelivery can retry', async () => {
+    const db = claimTrackingDb();
+    const app = setupApp();
+    autoReplyMocks.maybeSendOpenAIAutoReply.mockRejectedValueOnce(new Error('gateway down'));
+    vi.mocked(fireEvent).mockRejectedValueOnce(new Error('bus down'));
+
+    await post(app, db, messageBody({ webhookEventId: 'event-crash' }));
+    expect(autoReplyMocks.maybeSendOpenAIAutoReply).toHaveBeenCalledTimes(1);
+
+    // Same id again: the claim was released, so the event is processed afresh.
+    await post(app, db, messageBody({ webhookEventId: 'event-crash' }));
+    expect(autoReplyMocks.maybeSendOpenAIAutoReply).toHaveBeenCalledTimes(2);
+  });
+
+  test('an unclaimed event flagged isRedelivery is recorded but sends no AI reply', async () => {
+    const db = claimTrackingDb();
+    const app = setupApp();
+
+    const res = await post(
+      app,
+      db,
+      messageBody({ webhookEventId: 'event-redelivered', deliveryContext: { isRedelivery: true } }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(autoReplyMocks.maybeSendOpenAIAutoReply).not.toHaveBeenCalled();
+    expect(upsertChatOnMessage).toHaveBeenCalledWith(db, 'friend-1');
+  });
+
+  test('a fresh event still reaches the AI auto-reply', async () => {
+    const db = claimTrackingDb();
+    const app = setupApp();
+
+    await post(app, db, messageBody({ webhookEventId: 'event-fresh' }));
+
+    expect(autoReplyMocks.maybeSendOpenAIAutoReply).toHaveBeenCalledTimes(1);
   });
 });

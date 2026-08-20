@@ -23,6 +23,7 @@ import { processDueReminders } from './services/booking-reminders.js';
 import { runExpirer } from './services/booking-expirer.js';
 import { processDueEventReminders } from './services/event-booking-reminders.js';
 import { runEventBookingExpirer } from './services/event-booking-expirer.js';
+import { purgeExpiredWebhookEvents } from './services/webhook-dedup.js';
 import { sendEventBookingNotification } from './services/event-booking-notifier.js';
 import { sendBookingNotification } from './services/booking-notifier.js';
 import { DEFAULT_ACCOUNT_SETTINGS } from './services/booking-types.js';
@@ -979,6 +980,16 @@ async function scheduled(
       );
     } catch (e) {
       console.error('event-booking-expirer error:', e);
+    }
+  }
+
+  // Webhook claim rows past their TTL (#49) — 6h cron tick.
+  if (event.cron === '0 */6 * * *') {
+    try {
+      const purged = await purgeExpiredWebhookEvents(env.DB, new Date());
+      console.log(`[webhook-dedup] claims_purged=${purged}`);
+    } catch (e) {
+      console.error('webhook-dedup purge error:', e);
     }
   }
 
