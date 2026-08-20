@@ -93,3 +93,17 @@ docker compose up -d --build     # backend + postgres + minio; health: :8787/api
 - **Multi-account** is a first-class concept — most domain tables/queries are scoped by LINE account; check for `account_id` scoping when touching queries.
 - **Docs to update with behavior changes**: `docs/wiki/` feature pages and `docs/wiki/20-API-Reference.md` / `19-SDK-Reference.md`.
 - READMEs: `README.md` (English, default) and `README.ja.md` (Japanese) — keep both in sync.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `devs-nimm/line-crm`, driven by the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
