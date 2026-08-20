@@ -921,3 +921,16 @@ CREATE TABLE IF NOT EXISTS rich_menu_areas (
 CREATE INDEX IF NOT EXISTS idx_rich_menu_pages_group    ON rich_menu_pages(group_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_rich_menu_areas_page     ON rich_menu_areas(page_id);
 CREATE INDEX IF NOT EXISTS idx_rich_menu_groups_account ON rich_menu_groups(account_id, status);
+
+-- ============================================================
+-- webhook_event_claims: LINE webhook at-most-once guard (#49)
+-- LINE redelivers a webhook when the ACK is slow or fails; claiming the
+-- webhookEventId before processing stops the handler (and its sends) re-running.
+-- Rows are purged past expires_at on the 6h cron tick.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS webhook_event_claims (
+  webhook_event_id TEXT PRIMARY KEY,
+  claimed_at       TEXT NOT NULL,
+  expires_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_event_claims_expires ON webhook_event_claims (expires_at);

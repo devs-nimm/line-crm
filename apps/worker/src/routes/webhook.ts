@@ -23,6 +23,7 @@ import {
 import type { EntryRoute, Friend } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { maybeSendOpenAIAutoReply } from '../services/openai-auto-reply.js';
+import { claimWebhookEvent, releaseWebhookEvent } from '../services/webhook-dedup.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
 import type { Env } from '../index.js';
 import { getImageStore, type ImageStore } from '../lib/storage.js';
@@ -165,10 +166,36 @@ webhook.post('/webhook', async (c) => {
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
   const processingPromise = (async () => {
     for (const event of body.events) {
+      // #49: LINE redelivers when our ACK is slow or fails. Claim the event id
+      // first so a redelivery can't run the handler — and its sends — twice.
+      const webhookEventId = event.webhookEventId;
+      if (webhookEventId) {
+        let claimed = true;
+        try {
+          claimed = await claimWebhookEvent(db, webhookEventId, new Date());
+        } catch (err) {
+          // Fail open: losing a live message is worse than the duplicate this
+          // guard prevents. The isRedelivery check below still blocks the AI send.
+          console.error('[webhook] claim failed, processing anyway', webhookEventId, err);
+        }
+        if (!claimed) {
+          console.log(`[webhook] skipping already-processed event ${webhookEventId}`);
+          continue;
+        }
+      }
       try {
         await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL, getImageStore(c.env));
       } catch (err) {
         console.error('Error handling webhook event:', err);
+        // Give the claim back so LINE's redelivery gets another attempt —
+        // otherwise a transient failure silently loses the message.
+        if (webhookEventId) {
+          try {
+            await releaseWebhookEvent(db, webhookEventId);
+          } catch (releaseErr) {
+            console.error('[webhook] failed to release claim', webhookEventId, releaseErr);
+          }
+        }
       }
     }
   })();
@@ -695,7 +722,17 @@ async function handleEvent(
 
     let matched = false;
     let replyTokenConsumed = false;
-    for (const rule of autoReplies.results) {
+
+    // #49: a redelivery whose claim row is gone (purged, or whose claim INSERT
+    // failed) still reaches here. Chat state and the inbound log stay, but no
+    // reply is re-sent — keyword and AI replies alike are the duplicate LINE
+    // would otherwise deliver.
+    const isRedelivery = event.deliveryContext?.isRedelivery === true;
+    if (isRedelivery) {
+      console.log(`[webhook] redelivered event ${event.webhookEventId} — skipping auto-reply`);
+    }
+
+    for (const rule of isRedelivery ? [] : autoReplies.results) {
       const isMatch =
         rule.match_type === 'exact'
           ? incomingText === rule.keyword
@@ -757,7 +794,7 @@ async function handleEvent(
       }
     }
 
-    if (!matched) {
+    if (!matched && !isRedelivery) {
       try {
         const aiResult = await maybeSendOpenAIAutoReply({
           db,
