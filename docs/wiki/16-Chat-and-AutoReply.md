@@ -210,6 +210,12 @@ CREATE TABLE chat_sessions (
 
 **プラットフォーム制約:** bot にはユーザー端末側のメッセージ削除 (送信取消) 機能が無いため、管理画面でアーカイブしてもユーザーの LINE アプリ内の履歴は消えない。ユーザーはノート1によって会話がリセットされたことを知る。
 
+### AI への入力は最新メッセージのみ (#48)
+
+会話状態はゲートウェイ側 (Responses API) が保持するため、backend が毎ターン送る `input` は **その webhook イベント1件のテキストそのまま**で、過去のメッセージを連結しない。継続は `previous_response_id` のみで行う。LINE が複数の message イベントを1回の webhook にまとめて配信した場合も、イベントごとに1リクエストを送る (`webhook.ts` のイベントループ)。リクエストボディは `model` / `input` / `store` / `previous_response_id` の4フィールドのみ。
+
+回帰テスト: `openai-auto-reply.test.ts` (バッチ3ターンの `input` と連鎖する `previous_response_id`)、`webhook.test.ts` (multi-event webhook から渡る `incomingText`)。
+
 ### システムノート
 
 アーカイブ時 (ノート1、トリガーごとに文言が異なる) と新セッションの最初のメッセージ時 (ノート2「新しい会話を開始しました。以前の会話内容は引き継がれません。」) に、bot からテキストメッセージが送られる。これらは `messages_log` に `source='system_note'` で記録され、**LLM への入力には一切含まれない**。管理画面のチャット詳細では中央寄せのシステム区切りとして表示され、アーカイブ済みセッションのメッセージは薄い表示 + アーカイブ理由・日時付きの区切り線で示される。
