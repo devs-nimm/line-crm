@@ -203,6 +203,58 @@ describe('generateOpenAIReply', () => {
     await expect(generateOpenAIReply(SETTINGS, 'hello', null)).resolves.toBeNull();
   });
 
+  // Real hermes-agent gateway shape: every plugin tool is dispatched through a
+  // generic `tool_call` wrapper whose `arguments` is a JSON string of
+  // { name, arguments:<OBJECT> } — NOT a flat function_call named ask_user_line.
+  function toolCallWrappedPayload(
+    inner: { name: string; arguments: unknown },
+    opts: { narration?: string; id?: string } = {},
+  ) {
+    const output: unknown[] = [];
+    if (opts.narration) {
+      output.push({ type: 'message', content: [{ type: 'output_text', text: opts.narration }] });
+    }
+    output.push({
+      type: 'function_call',
+      name: 'tool_call',
+      call_id: 'chatcmpl-tool-1',
+      arguments: JSON.stringify(inner),
+    });
+    return new Response(JSON.stringify({ id: opts.id ?? 'resp_wrapped', output }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  test('unwraps a tool_call-wrapped ask_user_line (real hermes-agent shape)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      toolCallWrappedPayload(
+        { name: 'ask_user_line', arguments: { message: 'Do you want a discount?', kind: 'confirm' } },
+        { narration: 'Please tap Yes or No above.', id: 'resp_w' },
+      ),
+    );
+
+    await expect(generateOpenAIReply(SETTINGS, 'discount?', null)).resolves.toEqual({
+      text: 'Please tap Yes or No above.',
+      ask: { message: 'Do you want a discount?', kind: 'confirm' },
+      flex: [],
+      responseId: 'resp_w',
+    });
+  });
+
+  test('unwraps a tool_call-wrapped send_line_flex', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      toolCallWrappedPayload({
+        name: 'send_line_flex',
+        arguments: { alt_text: 'Card', contents: bubble('hi') },
+      }),
+    );
+
+    const result = await generateOpenAIReply(SETTINGS, 'show card', null);
+    expect(result?.flex).toHaveLength(1);
+    expect(result?.flex[0]).toMatchObject({ type: 'flex', altText: 'Card' });
+  });
+
   test('extracts an ask_user_line function_call alongside narration text', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       askPayload(
