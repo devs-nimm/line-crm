@@ -205,11 +205,36 @@ function extractFlexMessages(payload: ResponsesApiResponse): FlexMessage[] {
   return flex;
 }
 
+// The gateway 404s with {"error":{"message":"Response not found: <id>", ...}}
+// when the session behind previous_response_id was reaped server-side (#50).
+// Match that shape only — auth and 5xx failures must not wipe the session.
+const STALE_PREVIOUS_RESPONSE_ID = /response not found|previous_response_id/i;
+
+async function isStalePreviousResponseId(response: Response): Promise<boolean> {
+  if (response.status !== 404) return false;
+  if (!(response.headers.get('content-type') ?? '').includes('application/json')) return false;
+  try {
+    const body = (await response.json()) as { error?: { message?: unknown } };
+    const message = body?.error?.message;
+    return typeof message === 'string' && STALE_PREVIOUS_RESPONSE_ID.test(message);
+  } catch {
+    return false;
+  }
+}
+
 export async function generateOpenAIReply(
   settings: Pick<EffectiveOpenAISettings, 'baseUrl' | 'apiKey' | 'model'>,
   incomingText: string,
   previousResponseId: string | null,
-): Promise<{ text: string | null; ask: AskUserLine | null; flex: FlexMessage[]; responseId: string | null } | null> {
+): Promise<{
+  text: string | null;
+  ask: AskUserLine | null;
+  flex: FlexMessage[];
+  responseId: string | null;
+  // true when previousResponseId was rejected and the turn was retried fresh —
+  // the caller must restart the stored session instead of extending it.
+  sessionReset: boolean;
+} | null> {
   if (!settings.baseUrl || !settings.model) return null;
 
   const headers: Record<string, string> = {
@@ -219,20 +244,34 @@ export async function generateOpenAIReply(
     headers.Authorization = 'Bearer ' + settings.apiKey;
   }
 
-  const response = await fetch(buildResponsesUrl(settings.baseUrl), {
-    method: 'POST',
-    headers,
-    // Don't follow redirects: an auth-gated gateway 302s to /login (an HTML
-    // page), which fetch would otherwise follow to a 200 and we'd mistake for
-    // success. Surface it as a hard failure instead of a silent JSON-parse null.
-    redirect: 'manual',
-    body: JSON.stringify({
-      model: settings.model,
-      input: incomingText.slice(0, MAX_INPUT_CHARS),
-      store: true,
-      ...(previousResponseId ? { previous_response_id: previousResponseId } : {}),
-    }),
-  });
+  const url = buildResponsesUrl(settings.baseUrl);
+  const post = (prevId: string | null) =>
+    fetch(url, {
+      method: 'POST',
+      headers,
+      // Don't follow redirects: an auth-gated gateway 302s to /login (an HTML
+      // page), which fetch would otherwise follow to a 200 and we'd mistake for
+      // success. Surface it as a hard failure instead of a silent JSON-parse null.
+      redirect: 'manual',
+      body: JSON.stringify({
+        model: settings.model,
+        input: incomingText.slice(0, MAX_INPUT_CHARS),
+        store: true,
+        ...(prevId ? { previous_response_id: prevId } : {}),
+      }),
+    });
+
+  let response = await post(previousResponseId);
+  let sessionReset = false;
+  if (previousResponseId && (await isStalePreviousResponseId(response))) {
+    // Without this retry the friend is stuck for good: every later turn resends
+    // the dead id, fails the same way, and gets no reply.
+    console.warn('[openai-auto-reply] previous_response_id rejected — retrying fresh', {
+      previousResponseId,
+    });
+    response = await post(null);
+    sessionReset = true;
+  }
 
   const contentType = response.headers.get('content-type') ?? '';
   // status 0 = an opaqueredirect (redirect:'manual' caught a 3xx). Treat any
@@ -285,6 +324,7 @@ export async function generateOpenAIReply(
     ask,
     flex,
     responseId: typeof payload.id === 'string' && payload.id !== '' ? payload.id : null,
+    sessionReset,
   };
 }
 
@@ -493,7 +533,9 @@ export async function maybeSendOpenAIAutoReply(
         args.friendId,
         args.lineAccountId,
         result.responseId,
-        continuing ? session.turn_count + 1 : 1,
+        // A rejected previous_response_id started a brand-new gateway session,
+        // so the stored chain restarts at turn 1 (#50).
+        continuing && !result.sessionReset ? session.turn_count + 1 : 1,
         args.createdAt,
       )
       .run();
