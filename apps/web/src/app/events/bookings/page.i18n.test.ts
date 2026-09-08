@@ -38,4 +38,10 @@ describe('/events/bookings English coverage', () => {
     expect(labels.length).toBeGreaterThan(0)
     expect(labels.filter((k) => !(k in en))).toEqual([])
   })
+
+  it('runs the account country prefix through t()', () => {
+    // accountLabel used to inline `acct.country` untranslated, so English
+    // users saw the raw Japanese country name next to the account name.
+    expect(pageSource).toContain('t(acct.country)')
+  })
 })
