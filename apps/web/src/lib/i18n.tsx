@@ -1586,6 +1586,9 @@ export const en: Record<string, string> = {
   "ブロック/退会": "Blocked/Unfollowed",
   "流入元 Instagram": "Inflow source: Instagram",
   "経由": "via",
+
+  // --- Page metadata (layout.tsx <meta name="description">) ---
+  "L Harness 管理画面": "L Harness admin panel",
 }
 
 interface I18nValue {
@@ -1619,6 +1622,13 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     (key: string) => (locale === 'en' ? en[key] ?? key : key),
     [locale],
   )
+
+  // <meta name="description"> is static Next.js metadata (rendered before the
+  // client-only locale is known), so it never goes through t(). Sync it here
+  // the same way <html lang> is synced above.
+  useEffect(() => {
+    document.querySelector('meta[name="description"]')?.setAttribute('content', t('L Harness 管理画面'))
+  }, [locale, t])
 
   return (
     <I18nContext.Provider value={{ locale, setLocale, t }}>
