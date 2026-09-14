@@ -190,7 +190,7 @@ function BookingsInner() {
                   {items.map((b) => {
                     const acct = accounts.find((a) => a.id === b.line_account_id)
                     const accountLabel = acct
-                      ? `${acct.country ? acct.country + ' ' : ''}${acct.name}`
+                      ? `${acct.country ? t(acct.country) + ' ' : ''}${acct.name}`
                       : (b.line_account_id ?? '').slice(0, 8)
                     return (
                     <tr key={b.id} className="border-t border-gray-100 hover:bg-gray-50">

@@ -453,6 +453,13 @@ export const en: Record<string, string> = {
   "韓国": "Korea",
   "アメリカ": "USA",
   "その他": "Other",
+  // Additional country-flag.ts names (not in COUNTRY_OPTIONS, but may be stored on an account)
+  "英国": "UK",
+  "シンガポール": "Singapore",
+  "インドネシア": "Indonesia",
+  "ベトナム": "Vietnam",
+  "マレーシア": "Malaysia",
+  "インド": "India",
   // OpenAI connection card (openai-connection-setting)
   "OpenAI 接続設定（チャット自動返信）": "OpenAI connection settings (chat auto-reply)",
   "サーバー環境変数 OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL が設定されている場合は、ここで保存した値よりも環境変数が優先されます。": "If the server environment variables OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL are set, they take precedence over the values saved here.",
